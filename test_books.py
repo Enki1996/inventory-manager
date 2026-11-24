@@ -6,7 +6,8 @@ import tempfile
 from fastapi.testclient import TestClient
 from book_catalog import BOOKS_BY_BRANCH
 
-assert len(BOOKS_BY_BRANCH['medication']) == 10
+assert len(BOOKS_BY_BRANCH['medication']) == 11
+assert 'سجل المغذيات - قسم الصيدلة' in BOOKS_BY_BRANCH['medication']
 assert len(BOOKS_BY_BRANCH['medical_supplies']) == 7
 assert len(BOOKS_BY_BRANCH['surgical_instruments']) == 2
 
@@ -30,8 +31,8 @@ with tempfile.TemporaryDirectory() as tmp:
                 r=admin.post('/api/items',headers=csrf,json=item(branch,book,f'{branch}-{idx}'))
                 assert r.status_code==200,(branch,book,r.status_code,r.text)
                 all_ids.append(r.json()['id'])
-        assert len(all_ids)==19
-        assert len(admin.get('/api/items').json())==19
+        assert len(all_ids)==20
+        assert len(admin.get('/api/items').json())==20
 
         # Reject newly typed books and a book belonging to a different branch.
         bad=admin.post('/api/items',headers=csrf,json=item('medication','سجل الحياتية','MED-BAD'))
@@ -42,7 +43,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert bad.status_code==422,bad.text
         bad=admin.patch('/api/items/'+str(all_ids[0]),headers=csrf,json=item('medical_supplies',BOOKS_BY_BRANCH['medication'][0],'EDIT-BAD'))
         assert bad.status_code==422,bad.text
-        assert len(admin.get('/api/items').json())==19  # rejected requests leave no records
+        assert len(admin.get('/api/items').json())==20  # rejected requests leave no records
 
         # A legacy V4.2 free-text category remains visible and unchanged until reclassified.
         with db() as c:
@@ -77,6 +78,6 @@ with tempfile.TemporaryDirectory() as tmp:
         assert restored.status_code==200,restored.text
         assert admin.post('/api/login',json={'username':'enki','password':'123'}).status_code==200
         rows=admin.get('/api/items').json()
-        assert len(rows)==21  # 19 official, one reclassified legacy, one staff addition
+        assert len(rows)==22  # 20 official, one reclassified legacy, one staff addition
         assert any(x['sku']=='LEGACY-1' and x['category']==BOOKS_BY_BRANCH['medication'][5] for x in rows)
-print('PASS: 19 books, branch-book matching, staff permissions, legacy records, backup restore')
+print('PASS: 20 books, branch-book matching, staff permissions, legacy records, backup restore')

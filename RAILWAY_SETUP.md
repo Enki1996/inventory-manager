@@ -1,8 +1,12 @@
+# V4.5: fixed Add Item UI, one new Medication book; no database-schema changes.
+
+For detailed verification of your Railway deployment, read **V4_5_DEPLOY_AND_VERIFY.md**.
+
 # V4.4 deployment note
 
-Replace the code in the same PRIVATE GitHub repository and redeploy the SAME Railway service without replacing or detaching the persistent `/data` volume. Back up the live database first. V4.4 adds two nullable-compatible/defaulted columns to the existing `items` table (`trade_name` and `initial_batch_no`); existing items and movement history are preserved. New items require batch number, expiration date, and an approved unit per branch. Do not commit `.env`, a live SQLite file, or backup files.
+Replace the code in the same PRIVATE GitHub repository and redeploy the SAME Railway service without replacing or detaching the persistent `/data` volume. Back up the live database first. V4.4 originally added two nullable-compatible/defaulted columns to the existing `items` table (`trade_name` and `initial_batch_no`); existing items and movement history are preserved. New items require batch number, expiration date, an approved unit and a matching book for their branch. A V4.5 tag appears in the Add Item modal. Do not commit `.env`, a live SQLite file, or backup files.
 
-# Railway shared testing setup — Hospital Warehouse IMS V4.4
+# Railway shared testing setup — Hospital Warehouse IMS V4.5
 
 This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default). Version 4.2 adds fixed warehouse branches, a book/register category field, and per-employee branch permissions using an additive database migration. **Download and safely store a current database backup before updating an existing Railway deployment.** Keep the `/data` volume attached to the same service.
 
@@ -13,7 +17,7 @@ This package contains the Home, Login, Dashboard, API, SQLite schema and bilingu
 
 ## 1. Make a code repository
 
-A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.3 project to the repository root (not its enclosing folder).
+A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.5 project to the repository root (not its enclosing folder).
 
 B. In Railway -> New Project -> Deploy from GitHub Repo -> select the repository.
 
@@ -47,7 +51,7 @@ After login, create a test operator and test viewer from Users & Permissions, th
 ## 5. Verify persistence and permissions
 
 1. Create Department `ER` / Emergency.
-2. Add Item `MED-TEST-001` / Sample Vial; choose the **Medication** branch and the official book **سجل الحياتية - قسم الصيدلة**.
+2. Add a dummy Medication item with trade and scientific names; choose the **Medication** branch and the official book **سجل الحياتية - قسم الصيدلة**.
 3. Receive 100 units with a fabricated batch and expiry date, using an incoming document reference.
 4. Issue 20 to ER using a fabricated paper requisition number.
 5. Refresh, sign out, sign in and verify 80 remain.
@@ -72,7 +76,7 @@ This is not production-ready: no full security audit, no centralized rate-limiti
 
 ## Updating an existing V4.1 Railway test deployment
 
-**Download a backup first.** Do not remove or replace the attached `/data` volume, and do not upload a database file to GitHub. Update the existing private GitHub repository with the V4.4 code. Railway redeploys the application, which automatically adds `items.trade_name` and `items.initial_batch_no` to the SQLite database without deleting records. Existing historical items and staff cannot be assigned a branch automatically without guessing; the admin must edit them and choose one of the fixed branches. See `ITEM_FIELDS_V4_4.md` for the new fields and unit rules.
+**Download a backup first.** Do not remove or replace the attached `/data` volume, and do not upload a database file to GitHub. Update the existing private GitHub repository with the V4.5 code. Railway redeploys the application, which automatically adds `items.trade_name` and `items.initial_batch_no` to the SQLite database without deleting records. Existing historical items and staff cannot be assigned a branch automatically without guessing; the admin must edit them and choose one of the fixed branches. See `ITEM_FIELDS_V4_4.md` for the new fields and unit rules.
 
 ### Bilingual UI
 

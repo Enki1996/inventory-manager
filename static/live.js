@@ -1,4 +1,4 @@
-/* Live V4.4 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.5 bilingual warehouse prototype: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -161,30 +161,36 @@ function modalClose(){const el=$('#entityModal');el.classList.remove('open');el.
 function editItem(it=null){
  const b=it?.branch||user.branch||'';
  const legacyWarn=it?.category&&!approvedBook(it.branch,it.category)?`<small class="legacy-book-warning">Existing category: ${E(it.category)} — please choose an approved book for this branch.</small>`:'';
- // Explicit DOM order is also the tab / keyboard order requested by warehouse staff.
+ // Fields are in the EXACT reading/tab order agreed with the warehouse team.
+ // RTL layout places the first member of each pair on the right.
+ const wide=s=>s.replace('class="db-field"','class="db-field wide"');
  const f=[
-  field('Warehouse branch',branchField('branch',b,user.role==='admin'), 'Each item belongs to exactly one warehouse branch.'),
-  field('Trade name',`<input name="trade_name" class="db-input" maxlength="160" value="${E(it?.trade_name||'')}" placeholder="Brand / commercial name">`).replace('class="db-field"','class="db-field" data-med-trade'),
+  wide(field('Warehouse branch',branchField('branch',b,user.role==='admin'), 'Choose your assigned warehouse branch first.')),
+  field('Trade name',`<input name="trade_name" class="db-input" maxlength="160" value="${E(it?.trade_name||'')}" placeholder="Commercial or brand name">`).replace('class="db-field"','class="db-field" data-med-trade'),
   field('Scientific name',`<input name="name" class="db-input" maxlength="160" value="${E(it?.name||'')}" placeholder="Scientific / active ingredient name">`).replace('class="db-field"','class="db-field" data-med-scientific'),
-  field('Item name',`<input name="name" class="db-input" maxlength="160" value="${E(it?.name||'')}" placeholder="Item / supply / instrument name">`).replace('class="db-field"','class="db-field" data-other-name'),
+  wide(field('Item name',`<input name="name" class="db-input" maxlength="160" value="${E(it?.name||'')}" placeholder="Name of the supply / instrument">`)).replace('class="db-field wide"','class="db-field wide" data-other-name'),
   field('Stock unit',`<select name="unit" class="db-select" data-item-unit required>${unitOptions(b,it?.unit||'')}</select>`),
   field('Book / register category',`<select name="category" class="db-select" data-item-book required>${optionsForBooks(b,it?.category||'')}</select>${legacyWarn}`),
-  field('Batch number',`<input name="batch_no" class="db-input" maxlength="90" required value="${E(it?.initial_batch_no||it?.display_batch_no||'')}" placeholder="Batch / lot number">`, 'Registers a reference batch; quantity stays zero until receiving stock.'),
-  field('Expiration date',`<input name="expiry_date" class="db-input" type="date" required value="${E(it?.expiry_date||'')}">`, 'Required. Received batches retain their own independent expiry dates.'),
+  field('Batch number',`<input name="batch_no" class="db-input" maxlength="90" required value="${E(it?.initial_batch_no||it?.display_batch_no||'')}" placeholder="Batch / lot number">`),
+  field('Expiration date',`<input name="expiry_date" class="db-input" type="date" required value="${E(it?.expiry_date||'')}">`, 'Required for every new item.'),
   field('Manufacture date (optional)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`),
   field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
-  field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Slang, common names, local terms, abbreviations, spellings...">${E(it?.information||'')}</textarea>`, 'All alternative names are searchable.').replace('class="db-field"','class="db-field wide"')
+  wide(field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Common names, Iraqi slang, abbreviations, alternate spellings...">${E(it?.information||'')}</textarea>`, 'All alternate names are searchable.'))
  ];
- if(it)f.push(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`));
- modalOpen(it?'Edit item':'Register item','Choose the branch first. Its book and stock unit options update automatically. Stock is added only by a received shipment.',f.join(''),`item:${it?.id||'new'}`);
- const form=$('#entityForm');form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
+ if(it)f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
+ modalOpen(it?'Edit item':'Register item','Select the warehouse branch first. Only the relevant names, approved units and official books will appear. New items start with zero stock.',f.join(''),`item:${it?.id||'new'}`);
+ const form=$('#entityForm');form.classList.add('item-form-grid');
+ form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
+ const dlg=form.closest('.modal-body');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.5</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
+ window.HWLang?.apply();
 }
 function syncItemBranchFields(form, previousBook='', previousUnit=''){
  if(!form?.dataset.entity?.startsWith('item:'))return;
  const branch=form.querySelector('select[name="branch"]')?.value || form.querySelector('input[name="branch"]')?.value || '';
  const book=form.querySelector('[data-item-book]');
- if(book){const choice=previousBook||book.value; book.innerHTML=optionsForBooks(branch,choice);book.value=approvedBook(branch,choice)?choice:'';book.disabled=!branch;}
+ if(book){const choice=previousBook||book.value;book.innerHTML=optionsForBooks(branch,choice);book.value=approvedBook(branch,choice)?choice:'';book.disabled=!branch;}
  const units=form.querySelector('[data-item-unit]');
  if(units){const previous=previousUnit||units.value;
   const allowLegacy=!!(form.dataset.originalBranch===branch && form.dataset.originalUnit===previous && previous);
@@ -196,6 +202,10 @@ function syncItemBranchFields(form, previousBook='', previousUnit=''){
   container.hidden=!visible;
   const input=container.querySelector('input');if(input){input.disabled=!visible;input.required=visible;}
  }
+ // Editing a form never changes saved stock, batches, or movement history.
+ // Keep disabled inputs out of the submitted JSON to avoid duplicate names.
+ form.dataset.branch=branch;
+ window.HWLang?.apply();
 }
 function editDept(it=null){modalOpen(it?'Edit department':'Add department','Departments are distribution destinations, not separate inventory locations.',
  field('Department code',`<input name="code" class="db-input" required maxlength="30" value="${E(it?.code||'')}" placeholder="ER">`)+field('Department name',`<input name="name" class="db-input" required value="${E(it?.name||'')}" placeholder="Emergency Department">`)+(it?field('Status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`):''),

@@ -48,6 +48,8 @@ BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 4
+# App release is distinct from the SQLite schema version (no destructive migration).
+APP_RELEASE = '4.5.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -69,7 +71,7 @@ async def security_headers(request: Request, call_next):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    if request.url.path.startswith('/api/'):
+    if request.url.path.startswith('/api/') or request.url.path.startswith('/static/'):
         response.headers['Cache-Control'] = 'no-store'
     if PUBLIC_DEPLOY:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000'
@@ -635,6 +637,9 @@ async def update_item(item_id: int, request: Request):
             category = require_book(branch, d.get('category'))
             name, trade = item_name_fields(d, branch)
             generic, manufacturer, mfg, exp, info = item_details(d)
+            # Hidden legacy generic-name field must survive an edit in the new form.
+            if 'generic_name' not in d:
+                generic = old['generic_name']
             batch_no = item_batch_no(d)
             unit = require_unit(branch, d.get('unit'), legacy_unit=old['unit'] if branch==old['branch'] or old['branch'] is None else None)
             sku = validated_text(d, 'sku', required=False, max_len=50).upper() or old['sku']
@@ -1011,7 +1016,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'database':'sqlite','version':SCHEMA_VERSION}
+    return {'ok':True,'database':'sqlite','version':SCHEMA_VERSION,'release':APP_RELEASE}
 
 
 @app.exception_handler(sqlite3.OperationalError)

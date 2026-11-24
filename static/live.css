@@ -39,3 +39,14 @@
 /* V4.4 branch-dependent entry fields */
 .db-field[hidden]{display:none!important}
 .item-dialog .db-field:has(input[required])>span::after,.item-dialog .db-field:has(select[required])>span::after{content:' *';color:#c45d51}
+
+/* V4.5: strict field order — branch spans full row, RTL reading order is preserved. */
+.item-dialog{width:min(780px,100%)}
+.item-dialog .item-form-grid>.db-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px}
+.item-dialog .item-form-grid>.db-grid>.db-field.wide{grid-column:1/-1}
+.item-dialog .item-form-grid .db-field{align-content:start}
+.item-dialog .item-form-grid .db-field>span{font-size:12px}
+.item-dialog .item-form-grid select{min-height:44px}
+.item-dialog .item-form-grid .db-textarea{min-height:110px}
+.form-version{vertical-align:middle;display:inline-flex;font-size:10px;font-weight:800;color:#07878c;background:#eaf9f8;border:1px solid #bfe8e5;border-radius:12px;padding:4px 9px;margin-inline-start:9px}
+@media(max-width:700px){.item-dialog .item-form-grid>.db-grid{grid-template-columns:1fr}}

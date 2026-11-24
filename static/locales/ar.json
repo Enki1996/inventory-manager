@@ -456,5 +456,12 @@
   "All alternative names are searchable.": "يمكن البحث باستخدام جميع الأسماء البديلة.",
   "Slang, common names, local terms, abbreviations, spellings...": "أسماء شائعة، تسميات محلية، اختصارات، مرادفات...",
   "Legacy unit — unchanged": "وحدة قديمة — دون تغيير",
-  "Item / scientific name / SKU": "اسم الصنف / الاسم العلمي / الرمز"
+  "Item / scientific name / SKU": "اسم الصنف / الاسم العلمي / الرمز",
+  "Choose your assigned warehouse branch first.": "اختر فرع المخزن أولاً.",
+  "Commercial or brand name": "اسم الدواء التجاري",
+  "Name of the supply / instrument": "اسم المستلزم أو الأداة",
+  "Required for every new item.": "حقل إلزامي عند إضافة أي صنف جديد.",
+  "All alternate names are searchable.": "جميع الأسماء البديلة قابلة للبحث.",
+  "Select the warehouse branch first. Only the relevant names, approved units and official books will appear. New items start with zero stock.": "اختر فرع المخزن أولاً، وستظهر الحقول والوحدات والسجلات المعتمدة الخاصة به فقط. يبدأ الصنف الجديد برصيد صفري.",
+  "Common names, Iraqi slang, abbreviations, alternate spellings...": "أسماء متداولة، تسميات عراقية، اختصارات، تهجئات أخرى..."
 }
