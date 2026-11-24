@@ -1,33 +1,46 @@
-# Hospital Warehouse IMS V4.3 — Fixed books per warehouse branch
+# Hospital Warehouse IMS V4.4 — Arabic-first, branch-specific Add Item forms
 
-**Arabic is the default language**. The Home, Login and Warehouse Dashboard retain the approved white/icy-blue/teal styling. The app uses a Python/FastAPI backend and a persistent SQLite database for controlled multi-user *testing*, including stock receiving, distribution, accounts, access permissions, audit history and backup/restore.
+This is a **shared testing application** for a single hospital warehouse. It contains a FastAPI server, SQLite database, login and permission checks, home/login/dashboard UI, receiving/issuing/returns, movement and requisition history, branch-specific books, and backup/restore. The default language is Arabic, with an English switch. The approved white / icy-blue / teal design is unchanged.
 
-## New in V4.3
+## New in V4.4
 
-- Each item still belongs to **exactly one** of the three fixed warehouse branches: Medication, Medical Supplies, or Surgical Instruments.
-- The **Book / Register Category** field is now a **required dropdown**, not free text. It shows only the official register names for the item's branch: 10 Medication books, 7 Medical Supplies books, and 2 Surgical Instruments books.
-- A branch-restricted employee sees their assigned branch locked; admins may select any branch. Regardless of role, the server rejects a book not authorized for that branch (HTTP 422), even when the API is called directly.
-- Changing the selected branch refreshes the book list and clears an incompatible choice. The Inventory page includes branch and dependent book filters, and its text search still searches the book name.
-- Previous items, batches, stock, accounts, paper requisition references, movements, and audit history remain untouched. **Previously entered book text is never renamed automatically**. Items with old/free-text classifications remain visible and can still be issued/received; their book must be selected from the new list when the item itself is next edited. There is an in-form warning on such legacy values.
-- The official names are maintained in one source file: [`book_catalog.py`](book_catalog.py). The frontend reads the mapping from the authenticated `/api/books` endpoint to avoid two drifting lists.
-- **No database schema migration is required for V4.2 → V4.3**: the existing `items.category` column stores the selected approved title. Schema stays at version 3, and V4.2 database backups remain compatible.
+The **first field is Warehouse Branch**. The rest of the Add/Edit Item form changes dynamically:
 
-See [`BRANCHES_AND_BOOKS_V4_3.md`](BRANCHES_AND_BOOKS_V4_3.md) for the exact approved titles and [`RAILWAY_SETUP.md`](RAILWAY_SETUP.md) for deploying to the existing private GitHub/Railway project.
+- **Medication**: Branch → Trade name (الاسم التجاري) → Scientific name (الاسم العلمي) → Unit (حب / كبسول / بطل / امبول / فيال / انبوب / تحاميل / قطرات) → Book → Batch number (الوجبة) → **Expiry (required)** → Manufacture date → Manufacturer → Information / alternate names.
+- **Medical supplies**: Branch → Item name → Unit (قطعة / كيس / بطل / باكة / رولة / باكيت / درزن) → Book → Batch number → **Expiry (required)** → Manufacture date → Manufacturer → Information / alternate names.
+- **Surgical instruments**: Same as supplies, with the **single unit قطعة** and only this branch's two approved books.
 
-## Run locally for testing
+Branch and Book still enforce the V4.3 categories and V4.2 employee branch restrictions on the server. Each new item receives an **automatically generated SKU** rather than requiring the clerk to type a product code.
 
-Run `pip install -r requirements.txt` and `uvicorn app:app --host 127.0.0.1 --port 8000`, or use the provided Windows/macOS startup script. Open http://127.0.0.1:8000 and log in as `enki / 123` **only in a disposable local test environment**. For an internet-accessible Railway instance, configure a *different strong admin password in private environment variables*. Never use `123` online.
+The batch number entered in Add Item creates a **zero-stock registered batch** (not a receipt); stock quantities change only when staff record incoming/outgoing shipments. The original batch expiry of existing movements is never silently overwritten. The Catalog's reference expiry is required for new items but independent from the actual per-batch expiry used to issue stock.
 
-## Update existing Railway testing deployment
+See [ITEM_FIELDS_V4_4.md](ITEM_FIELDS_V4_4.md) for implementation detail, schema compatibility, and all unit lists. The allowed units live in `unit_catalog.py`, official books in `book_catalog.py`, and editable Arabic UI strings in `static/locales/ar.json`.
 
-1. In the running app, download a manual backup and keep it securely, as a precaution.
-2. Replace the code files in your existing **private** GitHub repository with the contents of this ZIP. Do not upload a database file, downloaded backup, or `.env` secrets.
-3. Allow Railway to redeploy; **do not delete or replace the existing persistent volume at `/data`**.
-4. After the update, verify you can sign in and that previous items, stocks, movements and accounts are still present. Open Add Item and confirm that choosing a branch shows only its own books.
-5. Review older items whose book categories were typed freely in V4.2; update them to an official book when convenient.
+## Deployment and preserving data
 
-This is a testing build, not a clinically certified inventory service. App-generated backup ZIPs are not encrypted. Before real hospital use, add off-site automated backups, stronger security measures and a tested disaster-recovery plan. Do not use patient/confidential records during testing.
+1. **Before changing code**, download a database backup from the running app and store it securely.
+2. Extract the ZIP and update the **same private GitHub repository** with the files, not the ZIP archive itself.
+3. Redeploy the **same Railway service** with its existing persistent `/data` volume and `WAREHOUSE_DATA_DIR=/data` unchanged. Never replace or detach that volume just to update code.
+4. V4.4 safely adds two columns (`trade_name`, `initial_batch_no`) when the server starts; existing items, batches, departments, staff accounts, and movements remain in place. Previously registered items are *not* guessed or renamed; when edited, missing mandatory fields will need to be supplied.
+5. After deployment, sign in, check existing stock and users, and create a **dummy** item under each branch to verify the new form before real data entry.
 
-## Verification
+See [RAILWAY_SETUP.md](RAILWAY_SETUP.md) for first-time deployment details. Do not commit `.env`, `warehouse.sqlite3`, `/data`, or backup ZIPs to GitHub.
 
-Run `python test_books.py`, `python test_flow.py`, `python test_branches.py`, `python test_item_details.py`, and `python test_upgrade_from_v41.py`. All tests use temporary disposable databases rather than the live inventory database.
+## Running locally
+
+`pip install -r requirements.txt` then `uvicorn app:app --host 127.0.0.1 --port 8000`, and open `http://127.0.0.1:8000`. The **local demonstration only** creates the testing login `enki / 123`; public deployment **must** use a strong secret through `WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD`. Never expose `123` online.
+
+## Automated regression tests
+
+Run from this folder:
+
+```sh
+python test_v44_item_form.py
+python test_flow.py
+python test_books.py
+python test_branches.py
+python test_item_details.py
+python test_upgrade_from_v41.py
+```
+
+All automated tests use temporary databases. This build is for collaborative testing, **not production hospital inventory**: backups currently are not encrypted and automated off-site recovery and operational security still need hardening. No patient-identifying data should be entered for testing.

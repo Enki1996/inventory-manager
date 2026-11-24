@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory() as path:
         h={'X-CSRF-Token':c.get('/api/me').json()['csrf']}
         record=c.get('/api/items').json()[0]
         assert record['stock']==12 and record['branch'] is None
-        assigned=c.patch('/api/items/'+str(item),headers=h,json={'sku':'OLD01','name':'Old item','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'vial'})
+        assigned=c.patch('/api/items/'+str(item),headers=h,json={'sku':'OLD01','name':'Old item','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'vial','trade_name':'Old trade','batch_no':'OLDLOT','expiry_date':'2028-06-30'})
         assert assigned.status_code==200,assigned.text
         updated=c.get('/api/items').json()[0]
         assert updated['branch']=='medication' and updated['stock']==12
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as path:
         assert c.post('/api/login',json={'username':'enki','password':'123'}).status_code==200
         recovered=c.get('/api/items').json()[0]
         assert recovered['stock']==12 and recovered['branch'] is None
-        assert c.get('/api/health').json()['version']==3
+        assert c.get('/api/health').json()['version']==4
     with sqlite3.connect(Path(path)/'warehouse.sqlite3') as db:
-        assert db.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()[0]=='3'
+        assert db.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()[0]=='4'
     print('PASS: V4.1 -> V4.2 in-place migration, legacy item assignment, historical stock, V4.1 backup restore')

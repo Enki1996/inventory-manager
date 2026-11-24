@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 from book_catalog import BOOKS_BY_BRANCH, valid_book
+from unit_catalog import UNITS_BY_BRANCH, valid_unit
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -46,9 +47,10 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
+assert set(UNITS_BY_BRANCH) == set(BRANCHES)
 PUBLIC_DEPLOY = os.getenv('WAREHOUSE_PUBLIC_DEPLOY', '').strip() == '1'
 SESSION_HOURS = 12
 ROLES = ('admin', 'manager', 'operator', 'viewer')
@@ -190,12 +192,54 @@ def migrate_branches(c: sqlite3.Connection):
               "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 
 
+def migrate_item_form(c: sqlite3.Connection):
+    """V4.3 -> V4.4: additive only; do not rewrite legacy medicine names or batches."""
+    columns = {row[1] for row in c.execute('PRAGMA table_info(items)')}
+    for name, definition in (
+        ('trade_name', "TEXT NOT NULL DEFAULT ''"),
+        ('initial_batch_no', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in columns:
+            c.execute(f'ALTER TABLE items ADD COLUMN {name} {definition}')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def require_unit(branch, value, *, legacy_unit=None):
+    unit = validated_text({'unit': value}, 'unit', max_len=30)
+    if not valid_unit(branch, unit) and (legacy_unit is None or unit != legacy_unit):
+        err(422, 'Choose an approved stock unit for the selected warehouse branch')
+    return unit
+
+
+def item_name_fields(d, branch, *, old=None):
+    """Medicine: display trade + scientific; supplies/tools: display item name only.
+    `items.name` remains the stable scientific/item name for old databases.
+    """
+    name = validated_text(d, 'name', max_len=160)
+    if branch == 'medication':
+        trade = validated_text(d, 'trade_name', max_len=160)
+    else:
+        trade = ''
+    return name, trade
+
+
+def item_batch_no(d):
+    return validated_text(d, 'batch_no', max_len=90)
+
+
+def make_sku(branch):
+    return {'medication':'MED','medical_supplies':'SUP','surgical_instruments':'SUR'}[branch] + '-' + secrets.token_hex(6).upper()
+
+
 def item_details(d):
-    """Optional catalog metadata; individual received batches have their own expiry."""
+    """Item reference dates; actual received batches keep their own expiry."""
     generic_name = validated_text(d, 'generic_name', required=False, max_len=160)
     manufacturer = validated_text(d, 'manufacturer', required=False, max_len=160)
     manufacture_date = dated(d.get('manufacture_date'), 'manufacture_date')
     expiry_date = dated(d.get('expiry_date'), 'expiry_date')
+    if not expiry_date:
+        err(422, 'Expiration date is required')
     information = validated_text(d, 'information', required=False, max_len=2000)
     if manufacture_date and expiry_date and manufacture_date > expiry_date:
         err(422, 'Item expiration date must not be earlier than its manufacture date')
@@ -239,6 +283,8 @@ def init_db():
                 unit TEXT NOT NULL,
                 min_stock INTEGER NOT NULL DEFAULT 0 CHECK(min_stock >= 0),
                 generic_name TEXT NOT NULL DEFAULT '',
+                trade_name TEXT NOT NULL DEFAULT '',
+                initial_batch_no TEXT NOT NULL DEFAULT '',
                 manufacturer TEXT NOT NULL DEFAULT '',
                 manufacture_date TEXT,
                 expiry_date TEXT,
@@ -283,6 +329,7 @@ def init_db():
         ''')
         migrate_item_details(c)
         migrate_branches(c)
+        migrate_item_form(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
             old = c.execute("SELECT password_hash FROM users WHERE username='enki'").fetchone()
@@ -525,11 +572,19 @@ def list_books(request: Request):
     return {branch: list(BOOKS_BY_BRANCH[branch]) for branch in BRANCHES}
 
 
+@app.get('/api/units')
+def units(request: Request):
+    get_user(request)
+    return {branch: list(UNITS_BY_BRANCH[branch]) for branch in BRANCHES}
+
+
 @app.get('/api/items')
 def list_items(request: Request):
     get_user(request)
     with db(readonly=True) as c:
-        return [dict(x) for x in c.execute('''SELECT i.*,COALESCE(SUM(b.on_hand),0) stock,COUNT(b.id) batch_count
+        return [dict(x) for x in c.execute('''SELECT i.*,COALESCE(SUM(b.on_hand),0) stock,COUNT(b.id) batch_count,
+                                             COALESCE(NULLIF(i.initial_batch_no,''),
+                                                (SELECT batch_no FROM batches WHERE item_id=i.id ORDER BY id DESC LIMIT 1),'') display_batch_no
                                              FROM items i LEFT JOIN batches b ON b.item_id=i.id GROUP BY i.id
                                              ORDER BY i.active DESC,i.branch,i.category,i.name''')]
 
@@ -539,25 +594,29 @@ async def create_item(request: Request):
     u = get_user(request, require_csrf=True)
     permit(u, 'item_write')
     d = await request.json()
-    sku = validated_text(d, 'sku', max_len=50).upper()
-    name = validated_text(d, 'name', max_len=160)  # Existing name is scientific item name.
     branch = require_branch(d.get('branch'))
     restrict_branch(u, branch)
-    cat = require_book(branch, d.get('category'))  # Official branch-specific register.
-    unit = validated_text(d, 'unit', max_len=30)
+    cat = require_book(branch, d.get('category'))
+    name, trade = item_name_fields(d, branch)
+    unit = require_unit(branch, d.get('unit'))
+    batch_no = item_batch_no(d)
+    sku = validated_text(d, 'sku', required=False, max_len=50).upper() or make_sku(branch)
     generic, manufacturer, mfg, exp, info = item_details(d)
     try:
         with db() as c:
-            q = c.execute('''INSERT INTO items(sku,name,category,branch,unit,generic_name,manufacturer,
-                            manufacture_date,expiry_date,information,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-                          (sku,name,cat,branch,unit,generic,manufacturer,mfg,exp,info,now()))
-            audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'branch':branch,'book_category':cat,
-                  'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
-                  'expiry_date':exp,'information':info})
-            return {'ok': True, 'id': q.lastrowid}
+            q = c.execute('''INSERT INTO items(sku,name,category,branch,unit,generic_name,trade_name,initial_batch_no,
+                            manufacturer,manufacture_date,expiry_date,information,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,now()))
+            # Register a batch with zero stock; it becomes available only after an IN movement.
+            c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
+                      (q.lastrowid,batch_no,exp,now()))
+            audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'trade_name':trade,
+                  'branch':branch,'book_category':cat,'unit':unit,'initial_batch_no':batch_no,
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info})
+            return {'ok': True, 'id': q.lastrowid, 'sku':sku}
     except sqlite3.IntegrityError:
-        err(409, 'Item code already exists')
+        err(409, 'Item code or registered batch already exists')
 
 
 @app.patch('/api/items/{item_id}')
@@ -565,12 +624,7 @@ async def update_item(item_id: int, request: Request):
     u = get_user(request, require_csrf=True)
     permit(u, 'item_write')
     d = await request.json()
-    sku = validated_text(d, 'sku', max_len=50).upper()
-    name = validated_text(d, 'name', max_len=160)
     branch = require_branch(d.get('branch'))
-    category = validated_text(d, 'category', max_len=80)
-    unit = validated_text(d, 'unit', max_len=30)
-    generic, manufacturer, mfg, exp, info = item_details(d)
     try:
         with db() as c:
             old = c.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
@@ -578,23 +632,34 @@ async def update_item(item_id: int, request: Request):
                 err(404, 'Item not found')
             restrict_branch(u, old['branch'])
             restrict_branch(u, branch)
-            category = require_book(branch, category)
+            category = require_book(branch, d.get('category'))
+            name, trade = item_name_fields(d, branch)
+            generic, manufacturer, mfg, exp, info = item_details(d)
+            batch_no = item_batch_no(d)
+            unit = require_unit(branch, d.get('unit'), legacy_unit=old['unit'] if branch==old['branch'] or old['branch'] is None else None)
+            sku = validated_text(d, 'sku', required=False, max_len=50).upper() or old['sku']
             has_movements = c.execute('SELECT 1 FROM movement_lines l JOIN batches b ON l.batch_id=b.id WHERE b.item_id=? LIMIT 1', (item_id,)).fetchone()
             if has_movements and old['unit'] != unit:
                 err(409, 'Cannot change the unit after stock movements have been recorded')
             if has_movements and old['branch'] is not None and old['branch'] != branch:
                 err(409, 'Cannot transfer an item to another branch after movements were recorded')
-            c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,
-                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,active=?
-                         WHERE id=?''',
-                      (sku,name,category,branch,unit,generic,manufacturer,mfg,exp,info,
+            # An edited reference batch NEVER changes expiry of a received/historical batch.
+            # If it's a new batch, seed it at zero stock for future receiving.
+            existing_batch = c.execute('SELECT id FROM batches WHERE item_id=? AND batch_no=?',
+                                       (item_id,batch_no)).fetchone()
+            if not existing_batch:
+                c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
+                          (item_id,batch_no,exp,now()))
+            c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,trade_name=?,initial_batch_no=?,
+                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,active=? WHERE id=?''',
+                      (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,
                        1 if d.get('active',True) else 0,item_id))
-            audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'branch':branch,'book_category':category,
-                  'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
-                  'expiry_date':exp,'information':info})
+            audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'trade_name':trade,
+                  'branch':branch,'book_category':category,'unit':unit,'reference_batch_no':batch_no,
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info})
         return {'ok': True}
     except sqlite3.IntegrityError:
-        err(409, 'Item code already exists')
+        err(409, 'Item code or registered batch already exists')
 
 
 @app.get('/api/batches')
@@ -868,7 +933,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 if info.file_size > 220*1024*1024:
                     err(413,'Uncompressed backup is too large')
                 manifest = json.loads(z.read('manifest.json'))
-                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, 2, SCHEMA_VERSION):
+                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, 2, 3, SCHEMA_VERSION):
                     err(422,'Not a compatible warehouse backup')
                 data = z.read('warehouse.sqlite3')
                 if hashlib.sha256(data).hexdigest()!=manifest.get('sha256'):
@@ -894,15 +959,22 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 admin = verify.execute('SELECT password_hash FROM users WHERE username=?', ('enki',)).fetchone()
                 if admin and pw_check('123', admin[0]):
                     err(422, 'This older backup contains the insecure local admin password and cannot be restored to a public server. Change it before exporting.')
-            if manifest['schema_version'] == 1:
+            version = manifest['schema_version']
+            if version == 1:
                 migrate_item_details(verify)
-            if manifest['schema_version'] <= 2:
+            if version <= 2:
                 migrate_branches(verify)
-                verify.commit()
-            else:
+            if version >= 3:
                 actual_columns = {row[1] for row in verify.execute('PRAGMA table_info(items)')}
                 if not {'generic_name','manufacturer','manufacture_date','expiry_date','information','branch'}.issubset(actual_columns):
-                    err(422, 'Backup declares V3 but is missing item/branch fields')
+                    err(422, 'Backup declares V3+ but is missing item/branch fields')
+            if version < 4:
+                migrate_item_form(verify)
+            else:
+                actual_columns = {row[1] for row in verify.execute('PRAGMA table_info(items)')}
+                if not {'trade_name','initial_batch_no'}.issubset(actual_columns):
+                    err(422, 'Backup declares V4 but is missing registered item fields')
+            verify.commit()
         except sqlite3.DatabaseError:
             err(422,'Invalid SQLite backup contents')
         finally:

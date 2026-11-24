@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory() as path:
         dept=dep.json()['id']
         def item(sku, branch, category):
             return {'sku':sku,'name':sku+' (scientific)','generic_name':'Generic',
-                    'manufacturer':'Supplier','category':category,'unit':'box','branch':branch,
+                    'manufacturer':'Supplier','category':category,'unit':{'medication':'حب','medical_supplies':'قطعة','surgical_instruments':'قطعة'}.get(branch,'قطعة'),'branch':branch,'trade_name':sku+' Trade','batch_no':'REG-'+sku,'expiry_date':'2029-12-31',
                     'information':'local alias, alternative'}
         ids={}
         for b in ('medication','medical_supplies','surgical_instruments'):
@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as path:
             r=admin.post('/api/movements',headers=a,json={'kind':'IN','paper_ref':'RECEIPT-'+b,
                    'source':'Test supplier','lines':[{'item_id':iid,'batch_no':'B-'+b,'expiry_date':'2029-12-01','qty':40}]})
             assert r.status_code==200,r.text
-        batches={b['branch']:b['id'] for b in admin.get('/api/batches').json()}
+        batches={b['branch']:b['id'] for b in admin.get('/api/batches').json() if b['on_hand']>0}
         assert set(batches)==set(ids)
         assert admin.post('/api/users',headers=a,json={'username':'nobranch','full_name':'Unassigned',
                'password':'TestPW123','role':'manager'}).status_code==422

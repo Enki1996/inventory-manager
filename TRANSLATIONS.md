@@ -1,4 +1,4 @@
-# Editing Arabic and English terminology — V4.3
+# Editing Arabic and English terminology — V4.4
 
 The site is **Arabic-first**; staff may switch to English from every page. The selection persists in their individual browser.
 
@@ -46,3 +46,7 @@ The information field accepts multiple aliases, slang terms and free-form notes 
 - `Assigned branch` → `الفرع المخصص`
 
 Book/register labels are now **selected from the approved list** for each branch, instead of typed by staff. The official Arabic titles live in `book_catalog.py` and remain in Arabic in both language modes; they are stored as inventory data and are not machine-translated. To rename an official register, update the catalog and plan how older saved classifications should be reconciled.
+
+## V4.4 Add Item labels
+
+The required field labels are translated by entries in `static/locales/ar.json` such as `Trade name` → `الاسم التجاري`, `Scientific name` → `الاسم العلمي`, `Batch number` → `الوجبة`, `Expiration date` → `تاريخ الصلاحية`, `Stock unit` → `الوحدة`. **The allowed unit option values themselves are official Arabic values even when the interface is in English**; change them only through a database-aware update to `unit_catalog.py`, not by editing the display translations.

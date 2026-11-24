@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert resp.json()=={key:list(names) for key,names in BOOKS_BY_BRANCH.items()}
 
         def item(branch,book,sku):
-            return {'branch':branch,'category':book,'name':'Example '+sku,'sku':sku,'unit':'box'}
+            return {'branch':branch,'category':book,'name':'Example '+sku,'trade_name':'Trade '+sku,'batch_no':'REF-'+sku,'expiry_date':'2029-12-31','sku':sku,'unit':{'medication':'حب','medical_supplies':'قطعة','surgical_instruments':'قطعة'}[branch]}
 
         all_ids=[]
         for branch, books in BOOKS_BY_BRANCH.items():

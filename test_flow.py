@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert client.post('/api/items',json={'sku':'X','name':'Test','category':'Medical','unit':'Box','min_stock':1}).status_code==403
         d=client.post('/api/departments',headers=csrf,json={'code':'ER','name':'Emergency'})
         assert d.status_code==200,d.text; dept=d.json()['id']
-        d=client.post('/api/items',headers=csrf,json={'sku':'MED-101','name':'Test Vial','generic_name':'Example Generic','manufacturer':'Test manufacturer','manufacture_date':'2026-01-01','expiry_date':'2029-06-30','information':'مثال دواء, alternative, common name','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'vial'})
+        d=client.post('/api/items',headers=csrf,json={'sku':'MED-101','name':'Test Vial','trade_name':'Test Trade','batch_no':'CATALOG-001','generic_name':'Example Generic','manufacturer':'Test manufacturer','manufacture_date':'2026-01-01','expiry_date':'2029-06-30','information':'مثال دواء, alternative, common name','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'فيال'})
         assert d.status_code==200,d.text; item=d.json()['id']
         saved=next(x for x in client.get('/api/items').json() if x['id']==item)
         assert saved['generic_name']=='Example Generic'
@@ -27,8 +27,8 @@ with tempfile.TemporaryDirectory() as temp:
         assert saved['expiry_date']=='2029-06-30' and saved['min_stock']==0
         d=client.post('/api/movements',headers=csrf,json={'kind':'IN','paper_ref':'GRN-2026-100','source':'Ministry medical supply','lines':[{'item_id':item,'batch_no':'BATCH-101','expiry_date':'2028-06-30','qty':100}]})
         assert d.status_code==200,d.text
-        b=client.get('/api/batches').json()[0]['id']
-        assert client.get('/api/batches').json()[0]['expiry_date']=='2028-06-30'  # Batch expiry independent of catalog date.
+        b=next(b['id'] for b in client.get('/api/batches').json() if b['on_hand']>0)
+        assert next(b for b in client.get('/api/batches').json() if b['on_hand']>0)['expiry_date']=='2028-06-30'  # Batch expiry independent of catalog date.
         assert client.get('/api/items').json()[0]['stock']==100
         d=client.post('/api/movements',headers=csrf,json={'kind':'OUT','paper_ref':'REQ-2026-200','department_id':dept,'lines':[{'batch_id':b,'qty':23}]})
         assert d.status_code==200,d.text

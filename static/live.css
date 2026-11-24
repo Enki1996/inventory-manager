@@ -35,3 +35,7 @@
 /* V4.3 — mandatory predefined book selector and legacy classification warning. */
 .legacy-book-warning{display:block;margin-top:7px;padding:9px 10px;border-radius:10px;background:#fff6e3;color:#83590e;border:1px solid #f1d9a2;font-weight:600;line-height:1.55}
 .db-select[data-item-book]:disabled{opacity:.65;cursor:not-allowed}
+
+/* V4.4 branch-dependent entry fields */
+.db-field[hidden]{display:none!important}
+.item-dialog .db-field:has(input[required])>span::after,.item-dialog .db-field:has(select[required])>span::after{content:' *';color:#c45d51}
