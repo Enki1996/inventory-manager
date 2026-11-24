@@ -1,0 +1,57 @@
+/* V4 bilingual additions. Always preserve the project's white/icy-blue/teal theme. */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Tajawal:wght@400;500;600;700;800&display=swap');
+html.i18n-pending body{visibility:hidden}
+.language-switch{display:inline-flex;align-items:center;gap:3px;padding:4px;border:1px solid rgba(70,164,182,.23);border-radius:12px;background:rgba(255,255,255,.84);box-shadow:0 4px 20px rgba(33,102,119,.06);direction:ltr;flex-shrink:0}
+.language-switch button{border:0;background:transparent;color:#597a8b;padding:8px 10px;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer;line-height:1.2;white-space:nowrap;transition:background .18s,color .18s}
+.language-switch button.selected{background:linear-gradient(120deg,#17b8b2,#07828a);color:#fff;box-shadow:0 3px 10px rgba(9,156,155,.16)}
+.language-switch button:focus-visible{outline:2px solid #137c85;outline-offset:2px}
+html[lang="ar"] body,html[lang="ar"] button,html[lang="ar"] input,html[lang="ar"] select,html[lang="ar"] textarea,html[lang="ar"] a{font-family:'Cairo','Tajawal',Tahoma,Arial,sans-serif}
+html[lang="ar"] body{letter-spacing:0}
+html[lang="ar"] h1,html[lang="ar"] h2,html[lang="ar"] h3,html[lang="ar"] h4,html[lang="ar"] .logo-name,html[lang="ar"] .brand-name{letter-spacing:0 !important;line-height:1.4}
+html[lang="ar"] .brand-sub,html[lang="ar"] .logo-sub{letter-spacing:0 !important;text-transform:none}
+html[lang="ar"] .navgroup h4,html[lang="ar"] .eyebrow{letter-spacing:0 !important}
+html[lang="ar"] .navitem,html[lang="ar"] .logout-item,html[lang="ar"] .db-table th,html[lang="ar"] .db-table td,html[lang="ar"] .db-input,html[lang="ar"] .db-select,html[lang="ar"] .db-textarea{direction:rtl;text-align:right}
+html[lang="ar"] .account-button,html[lang="ar"] .account-menu a{direction:rtl;text-align:right}
+html[lang="ar"] .account-menu{left:22px;right:auto}
+html[lang="ar"] .sidebar{border-left:1px solid #e3edf1;border-right:0}
+html[lang="ar"] .top-search input{min-width:0;text-align:right}
+html[lang="ar"] .top-crumb,html[lang="ar"] .db-panel,html[lang="ar"] .db-head{text-align:right}
+html[lang="ar"] .db-kpi .num,html[lang="ar"] .db-table .tiny{font-variant-numeric:tabular-nums}
+html[lang="ar"] .db-table{direction:rtl}
+html[lang="ar"] .db-table-wrap{direction:rtl}
+html[lang="ar"] .db-field{justify-items:stretch;text-align:right}
+html[lang="ar"] .login-art{align-items:flex-start;text-align:right}
+html[lang="ar"] .login-card{text-align:right}
+html[lang="ar"] .login-nav{direction:rtl}
+html[lang="ar"] .input-wrap{direction:rtl}
+html[lang="ar"] .login-tools,html[lang="ar"] .checkbox-label{direction:rtl}
+html[lang="ar"] .db-grid,html[lang="ar"] .db-layout,html[lang="ar"] .db-kpis{direction:rtl}
+html[lang="ar"] .ship-line,html[lang="ar"] .ship-line.issue{direction:rtl}
+html[lang="ar"] .db-table [data-edit-item],html[lang="ar"] .db-table [data-edit-dept]{white-space:nowrap}
+html[lang="ar"] .modal-body{text-align:right}
+html[lang="ar"] #entityModal{direction:rtl}
+html[lang="ar"] .modal-footer{justify-content:flex-start}
+html[lang="ar"] .db-alert,html[lang="ar"] .db-note{line-height:1.95}
+/* Keep batch IDs, item codes and dates readable in both directions. */
+input[name="sku"],input[name="paper_ref"],input[name="code"],input[name="username"],input[type="date"],input[name="confirmation"]{unicode-bidi:plaintext}
+html[lang="ar"] input[type="date"]{direction:ltr;text-align:left}
+html[lang="ar"] .db-table td strong,html[lang="ar"] .db-table .tiny{unicode-bidi:plaintext}
+/* Homepage and login switches use the existing header; no added marketing pages. */
+.nav-actions .language-switch{margin-inline:7px}
+.login-nav .language-switch{margin-inline:auto 16px}
+.dash-top .language-switch{margin-inline:0 3px}
+@media(min-width:901px){html[lang="ar"] .hero-grid{direction:rtl}html[lang="ar"] .copy{text-align:right}}
+@media(max-width:900px){.nav-actions .language-switch{margin-inline:0}.language-switch button{padding:7px 8px;font-size:10px}}
+@media(max-width:940px){
+  html[lang="ar"] .sidebar{right:0;left:auto;transform:translateX(110%);box-shadow:-12px 0 27px rgba(19,86,112,.13)}
+  html[lang="ar"] .sidebar.open{transform:translateX(0)}
+  html[lang="ar"] .login-art{min-height:0}
+  .dash-top .language-switch{order:1}
+}
+@media(max-width:480px){
+  .language-switch{gap:1px;padding:2px;border-radius:9px}
+  .language-switch button{font-size:9px;padding:6px 5px;border-radius:7px}
+  .nav-actions .language-switch{margin:0}
+  .login-nav .language-switch{margin-inline:0 7px}
+  .dash-top .language-switch button{font-size:10px;padding:5px}
+}
