@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert client.post('/api/items',json={'sku':'X','name':'Test','category':'Medical','unit':'Box','min_stock':1}).status_code==403
         d=client.post('/api/departments',headers=csrf,json={'code':'ER','name':'Emergency'})
         assert d.status_code==200,d.text; dept=d.json()['id']
-        d=client.post('/api/items',headers=csrf,json={'sku':'MED-101','name':'Test Vial','generic_name':'Example Generic','manufacturer':'Test manufacturer','manufacture_date':'2026-01-01','expiry_date':'2029-06-30','information':'مثال دواء, alternative, common name','category':'سجل الحياتية','branch':'medication','unit':'vial'})
+        d=client.post('/api/items',headers=csrf,json={'sku':'MED-101','name':'Test Vial','generic_name':'Example Generic','manufacturer':'Test manufacturer','manufacture_date':'2026-01-01','expiry_date':'2029-06-30','information':'مثال دواء, alternative, common name','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'vial'})
         assert d.status_code==200,d.text; item=d.json()['id']
         saved=next(x for x in client.get('/api/items').json() if x['id']==item)
         assert saved['generic_name']=='Example Generic'

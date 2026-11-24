@@ -23,7 +23,8 @@ with tempfile.TemporaryDirectory() as path:
                     'information':'local alias, alternative'}
         ids={}
         for b in ('medication','medical_supplies','surgical_instruments'):
-            r=admin.post('/api/items',headers=a,json=item(b.upper(),b,'سجل الحياتية' if b=='medication' else 'سجل خاص'))
+            books={'medication':'سجل الحياتية - قسم الصيدلة','medical_supplies':'سجل النبيذة - قسم الصيدلة','surgical_instruments':'سجل الفاتورة'}
+            r=admin.post('/api/items',headers=a,json=item(b.upper(),b,books[b]))
             assert r.status_code==200,r.text
             ids[b]=r.json()['id']
         assert admin.post('/api/items',headers=a,json=item('NO_BRANCH',None,'x')).status_code==422
@@ -47,14 +48,14 @@ with tempfile.TemporaryDirectory() as path:
             assert staff.post('/api/login',json={'username':'med_manager','password':'TestPW123'}).status_code==200
             u=staff.get('/api/me').json();h={'X-CSRF-Token':u['csrf']}
             assert u['branch']=='medication'
-            assert staff.post('/api/items',headers=h,json=item('ONLY_MED','medication','سجل الحياتية')).status_code==200
-            assert staff.post('/api/items',headers=h,json=item('NO_SURG','surgical_instruments','سجل الحياتية')).status_code==403
+            assert staff.post('/api/items',headers=h,json=item('ONLY_MED','medication','سجل الحياتية - قسم الصيدلة')).status_code==200
+            assert staff.post('/api/items',headers=h,json=item('NO_SURG','surgical_instruments','سجل الحياتية - قسم الصيدلة')).status_code==403
             assert staff.patch('/api/items/'+str(ids['surgical_instruments']),headers=h,
-                               json=item('HACK','medication','سجل الحياتية')).status_code==403
+                               json=item('HACK','medication','سجل الحياتية - قسم الصيدلة')).status_code==403
             assert staff.patch('/api/items/'+str(ids['medication']),headers=h,
-                               json=item('MOVE_BRANCH','surgical_instruments','سجل الحياتية')).status_code==403
+                               json=item('MOVE_BRANCH','surgical_instruments','سجل الحياتية - قسم الصيدلة')).status_code==403
             assert staff.patch('/api/items/'+str(ids['medication']),headers=h,
-                               json=item('MODIFIED_MED','medication','سجل الحياتية')).status_code==200
+                               json=item('MODIFIED_MED','medication','سجل الحياتية - قسم الصيدلة')).status_code==200
             assert staff.post('/api/movements',headers=h,json={'kind':'IN','paper_ref':'NO_ACCESS','source':'Supplier',
                                'lines':[{'item_id':ids['medical_supplies'],'batch_no':'B-OTHER','qty':5}]}).status_code==403
             assert staff.post('/api/movements',headers=h,json={'kind':'OUT','paper_ref':'OTHER','department_id':dept,
@@ -79,11 +80,11 @@ with tempfile.TemporaryDirectory() as path:
             assert staff.get('/api/me').status_code==401
             assert staff.post('/api/login',json={'username':'med_manager','password':'TestPW123'}).status_code==200
             h={'X-CSRF-Token':staff.get('/api/me').json()['csrf']}
-            assert staff.post('/api/items',headers=h,json=item('OLD_BRANCH','medication','X')).status_code==403
-            assert staff.post('/api/items',headers=h,json=item('NEW_BRANCH','medical_supplies','X')).status_code==200
+            assert staff.post('/api/items',headers=h,json=item('OLD_BRANCH','medication','سجل الحياتية - قسم الصيدلة')).status_code==403
+            assert staff.post('/api/items',headers=h,json=item('NEW_BRANCH','medical_supplies','سجل النبيذة - قسم الصيدلة')).status_code==200
         # Even admins cannot reclassify items after activity has been recorded.
         assert admin.patch('/api/items/'+str(ids['medication']),headers=a,
-                          json=item('MOVE_ADMIN','medical_supplies','X')).status_code==409
+                          json=item('MOVE_ADMIN','medical_supplies','سجل النبيذة - قسم الصيدلة')).status_code==409
         download=admin.get('/api/backup/export')
         assert download.status_code==200
         assert download.content.startswith(b'PK')
@@ -91,5 +92,5 @@ with tempfile.TemporaryDirectory() as path:
                      files={'backup':('test.zip',download.content,'application/zip')})
         assert r.status_code==200,r.text
         assert admin.post('/api/login',json={'username':'enki','password':'123'}).status_code==200
-        assert next(i for i in admin.get('/api/items').json() if i['id']==ids['medication'])['category']=='سجل الحياتية'
+        assert next(i for i in admin.get('/api/items').json() if i['id']==ids['medication'])['category']=='سجل الحياتية - قسم الصيدلة'
     print('PASS: three branches, staff scope, multi-line atomicity, account reassignment, admin protections, backup roundtrip')

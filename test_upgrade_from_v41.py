@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory() as path:
         h={'X-CSRF-Token':c.get('/api/me').json()['csrf']}
         record=c.get('/api/items').json()[0]
         assert record['stock']==12 and record['branch'] is None
-        assigned=c.patch('/api/items/'+str(item),headers=h,json={'sku':'OLD01','name':'Old item','category':'سجل الحياتية','branch':'medication','unit':'vial'})
+        assigned=c.patch('/api/items/'+str(item),headers=h,json={'sku':'OLD01','name':'Old item','category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'vial'})
         assert assigned.status_code==200,assigned.text
         updated=c.get('/api/items').json()[0]
         assert updated['branch']=='medication' and updated['stock']==12

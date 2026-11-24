@@ -22,6 +22,8 @@
     // Compose messages containing database values without translating user-entered data.
     let m=s.match(/^Welcome back, (.+)$/);
     if(m)return 'مرحباً بعودتك، '+m[1];
+    m=s.match(/^Existing category: (.+) — please choose an approved book for this branch\.$/);
+    if(m)return 'التصنيف السابق: '+m[1]+' — يرجى اختيار سجل معتمد لهذا الفرع.';
     m=s.match(/^Edit account: (.+)$/);
     if(m)return 'تعديل الحساب: '+m[1];
     m=s.match(/^Reset password: (.+)$/);

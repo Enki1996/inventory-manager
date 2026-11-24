@@ -1,4 +1,4 @@
-/* Live V4.2 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.3 bilingual warehouse prototype: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -8,7 +8,7 @@ const fmtDate = str=>new Date(str).toLocaleString(window.HWLang?.get()==='ar'?'a
 const D = str=>str?`<time class="localized-time" datetime="${E(str)}">${E(fmtDate(str))}</time>`:'—';
 const badge = (label,kind='neutral')=>`<span class="pill ${kind}">${E(label)}</span>`;
 const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E(title)}</strong><span class="muted-hint">${E(sub)}</span></div>`;
-let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null}, toastTimer;
+let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,books:{}}, toastTimer;
 const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Distribute to Departments',returns:'Returns & Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
@@ -19,7 +19,29 @@ const branchList=selected=>`<option value="">Select a branch</option>`+BRANCHES.
 const branchField=(name,selected='',allowSwitch=true)=>allowSwitch
  ? `<select class="db-select branch-select" name="${name}" required>${branchList(selected)}</select>`
  : `<select class="db-select branch-select" disabled aria-label="Assigned branch">${branchList(selected)}</select><input type="hidden" name="${name}" value="${E(selected)}">`;
-const bookCategories=()=>[...new Set(cache.items.map(x=>x.category?.trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+// Book names come from the server's official branch-to-register catalog.
+const booksFor = branch => cache.books?.[branch]||[];
+const approvedBook = (branch, category) => booksFor(branch).includes(category);
+const legacyBooksFor = branch => [...new Set(cache.items.filter(i=>i.category && (!branch||i.branch===branch) && !approvedBook(i.branch,i.category)).map(i=>i.category))].sort((a,b)=>a.localeCompare(b));
+const optionsForBooks = (branch,selected='') => {
+ let html='<option value="">Select a book / register</option>';
+ if(!branch || !booksFor(branch).length) return html;
+ html += booksFor(branch).map(name=>`<option value="${E(name)}" ${name===selected?'selected':''}>${E(name)}</option>`).join('');
+ return html;
+};
+const filterBookOptions = (branch='', selected='') => {
+ const show=branch?[branch]:BRANCHES.map(b=>b[0]);
+ let html='<option value="">All books / registers</option>';
+ for(const b of show){
+  const names=booksFor(b);
+  if(!names.length)continue;
+  const options=names.map(n=>`<option value="${E(n)}" ${n===selected?'selected':''}>${E(n)}</option>`).join('');
+  html+=`<optgroup label="${E(branchName(b))}">${options}</optgroup>`;
+ }
+ const legacy=legacyBooksFor(branch).filter(n=>!show.some(b=>approvedBook(b,n)));
+ if(legacy.length)html+=`<optgroup label="Legacy / needs review">${legacy.map(n=>`<option value="${E(n)}" ${n===selected?'selected':''}>${E(n)}</option>`).join('')}</optgroup>`;
+ return html;
+};
 
 const typeLabel = {IN:'Received',OUT:'Distributed',RETURN:'Returned',ADJUST_PLUS:'Added adjustment',ADJUST_MINUS:'Removed adjustment'};
 async function api(path,{method='GET',data,headers={},body}={}){
@@ -36,7 +58,7 @@ function toast(text,kind='ok'){
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),5000)
 }
 async function refreshData(){
-  const endpoints=['items','departments','batches','movements','dashboard'];
+  const endpoints=['items','departments','batches','movements','dashboard','books'];
   const rows=await Promise.all(endpoints.map(path=>api('/api/'+path)));
   for(let i=0;i<endpoints.length;i++)cache[endpoints[i]]=rows[i];
   if(can('users'))cache.users=await api('/api/users');
@@ -94,7 +116,7 @@ function overview(){
  ${kpis}<div class="db-layout"><div>${panel('Recent warehouse movements',table(['Movement','Type','Paper reference','From / To','Lines','By'],movementRows(cache.movements.slice(0,6))),'history')}</div><div>${panel('Attention needed',`<div class="db-help">${I('warning')} ${alerts.length} item(s) under the reorder threshold · ${exp.length} batch(es) expiring in the next 60 days.</div><div style="margin-top:15px">${alerts.slice(0,5).map(i=>`<div style="display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #eaf1f4;font-size:11px"><span>${E(i.name)}</span><strong>${N(i.stock)} / ${N(i.min_stock)}</strong></div>`).join('')||'<p class="muted-hint">No low-stock alerts at the moment.</p>'}</div>`,'warning')}
  ${panel('Quick navigation',`<div class="db-actions"><button class="db-btn secondary" data-go="inventory">Inventory</button><button class="db-btn secondary" data-go="departments">Departments</button><button class="db-btn secondary" data-go="movements">Movement history</button></div>`,'dashboard')}</div></div>`
 }
-function inventory(){return `${head('Item inventory','Create products independently of stock receipts. Stock is then added to its matching batch through Receive Shipments.',can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} New item</button>`:'')}${panel('Product catalog',`<div class="db-note"><span>Three fixed branches · Medication, Medical Supplies, Surgical Instruments.</span> <span>Book / Register Category is a separate editable classification.</span> ${user.role==='admin'?'<span>Administrators can classify unassigned legacy items.</span>':`<span>Your assigned branch:</span> <strong>${E(branchName(user.branch))}</strong>`}</div><div class="db-toolbar">${inp('filter','Search scientific, generic, common name, company or code...','search','id="itemFilter"')}<select class="db-select" id="itemBranchFilter"><option value="">All branches</option>${branchList('').replace('<option value="">Select a branch</option>','')}</select><select class="db-select" id="itemBookFilter"><option value="">All books / registers</option>${bookCategories().map(x=>`<option value="${E(x)}">${E(x)}</option>`).join('')}</select><span class="muted-hint">${cache.items.length} registered items</span></div><div id="itemResults">${table(inventoryColumns,itemRows(cache.items))}</div>`,'package')}`}
+function inventory(){return `${head('Item inventory','Create products independently of stock receipts. Stock is then added to its matching batch through Receive Shipments.',can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} New item</button>`:'')}${panel('Product catalog',`<div class="db-note"><span>Three fixed branches · Medication, Medical Supplies, Surgical Instruments.</span> <span>Books are predefined for each branch; select the matching register.</span> ${user.role==='admin'?'<span>Administrators can classify unassigned legacy items.</span>':`<span>Your assigned branch:</span> <strong>${E(branchName(user.branch))}</strong>`}</div><div class="db-toolbar">${inp('filter','Search scientific, generic, common name, company or code...','search','id="itemFilter"')}<select class="db-select" id="itemBranchFilter"><option value="">All branches</option>${branchList('').replace('<option value="">Select a branch</option>','')}</select><select class="db-select" id="itemBookFilter">${filterBookOptions()}</select><span class="muted-hint">${cache.items.length} registered items</span></div><div id="itemResults">${table(inventoryColumns,itemRows(cache.items))}</div>`,'package')}`}
 function departments(){return `${head('Hospital departments','These are shipment destinations. This version does not manage their internal stock.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',table(['Code','Department','Status','Actions'],departmentRows(cache.departments)),'building')}`}
 function batches(){return `${head('Batches and expiration','Stock quantity is recorded separately for every batch. Never issue expired lots.')}${panel('Batch register',table(['Product','Warehouse branch','Batch number','Expiration','Warehouse balance','Status'],batchRows(cache.batches)),'calendar')}`}
 function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Incoming</option><option value="OUT">Distributions</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper reference','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
@@ -136,7 +158,7 @@ function editItem(it=null){
   field('Generic name',`<input name="generic_name" class="db-input" maxlength="160" value="${E(it?.generic_name||'')}" placeholder="Generic / alternative official name">`),
   field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
   field('Warehouse branch',branchField('branch',it?.branch||user.branch||'',user.role==='admin'), 'Each product belongs to exactly one warehouse branch.'),
-  field('Book / register category',`<input name="category" class="db-input" list="bookCategories" required maxlength="80" value="${E(it?.category||'')}" placeholder="e.g. سجل الحياتية"><datalist id="bookCategories">${bookCategories().map(x=>`<option value="${E(x)}"></option>`).join('')}</datalist>`, 'Category from the hospital warehouse book or register. You can type a new register name.'),
+  field('Book / register category',`<select name="category" class="db-select" data-item-book required>${optionsForBooks(it?.branch||user.branch||'',it?.category||'')}</select>${it?.category&&!approvedBook(it?.branch,it.category)?`<small class="legacy-book-warning">Existing category: ${E(it.category)} — please choose an approved book for this branch.</small>`:''}`, 'Choose one of the official books for the selected warehouse branch.'),
   field('Stock unit',`<input name="unit" class="db-input" required maxlength="30" value="${E(it?.unit||'')}" placeholder="Vial, box, piece, bag">`),
   field('Manufacture date (optional)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`),
   field('Expiration date (optional)',`<input name="expiry_date" class="db-input" type="date" value="${E(it?.expiry_date||'')}">`),
@@ -144,7 +166,18 @@ function editItem(it=null){
    'Add as many alternative names or notes as you need. All text here is included in item search.').replace('class="db-field"','class="db-field wide"')
  ];
  if(it)f.push(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`));
- modalOpen(it?'Edit item':'Register item','Choose the warehouse branch, then its Book / Register Category. Dates here are catalog references; batch expiry is entered when receiving stock.',f.join(''),`item:${it?.id||'new'}`);
+ modalOpen(it?'Edit item':'Register item','Choose the warehouse branch, then its official book / register. Dates here are catalog references; batch expiry is entered when receiving stock.',f.join(''),`item:${it?.id||'new'}`);
+ syncItemBookField($('#entityForm'),it?.category||'');
+}
+function syncItemBookField(form, previous=''){
+ const selector=form?.querySelector('[data-item-book]');
+ if(!selector)return;
+ const branch=form.querySelector('select[name="branch"]')?.value || form.querySelector('input[name="branch"]')?.value || '';
+ const current=previous || selector.value;
+ selector.innerHTML=optionsForBooks(branch,current);
+ // Changing the branch never silently assigns a book from another branch.
+ selector.value=approvedBook(branch,current)?current:'';
+ selector.disabled=!branch;
 }
 function editDept(it=null){modalOpen(it?'Edit department':'Add department','Departments are distribution destinations, not separate inventory locations.',
  field('Department code',`<input name="code" class="db-input" required maxlength="30" value="${E(it?.code||'')}" placeholder="ER">`)+field('Department name',`<input name="name" class="db-input" required value="${E(it?.name||'')}" placeholder="Emergency Department">`)+(it?field('Status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`):''),
@@ -221,7 +254,9 @@ document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInvent
  if(e.target.id==='movementFilter')filterMovements()});
 document.addEventListener('change',e=>{
  if(e.target.id==='movementType')filterMovements();
- if(['itemBranchFilter','itemBookFilter'].includes(e.target.id))filterInventory();
+ if(e.target.id==='itemBranchFilter') { const filter=$('#itemBookFilter');if(filter){filter.innerHTML=filterBookOptions(e.target.value);filter.value=''}filterInventory(); }
+ if(e.target.id==='itemBookFilter')filterInventory();
+ if(e.target.matches('#entityForm select[name="branch"]'))syncItemBookField(e.target.closest('#entityForm'));
  if(e.target.matches('[data-user-role]'))syncUserBranchField(e.target.closest('#entityForm'));
 });
 function syncUserBranchField(form){

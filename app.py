@@ -22,6 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+from book_catalog import BOOKS_BY_BRANCH, valid_book
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -47,6 +48,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 3
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
+assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 PUBLIC_DEPLOY = os.getenv('WAREHOUSE_PUBLIC_DEPLOY', '').strip() == '1'
 SESSION_HOURS = 12
 ROLES = ('admin', 'manager', 'operator', 'viewer')
@@ -152,6 +154,14 @@ def require_branch(value, *, allow_unassigned=False):
     if allow_unassigned and value in (None, ''):
         return None
     err(422, 'Choose one of the three warehouse branches')
+
+
+def require_book(branch, value):
+    """Never allow a category from another branch or an arbitrary title."""
+    book = validated_text({'category': value}, 'category', max_len=80)
+    if not valid_book(branch, book):
+        err(422, 'Select an approved book / register for the chosen warehouse branch')
+    return book
 
 
 def restrict_branch(user, branch):
@@ -509,6 +519,12 @@ async def update_department(department_id: int, request: Request):
         err(409, 'Department name or code already exists')
 
 
+@app.get('/api/books')
+def list_books(request: Request):
+    get_user(request)
+    return {branch: list(BOOKS_BY_BRANCH[branch]) for branch in BRANCHES}
+
+
 @app.get('/api/items')
 def list_items(request: Request):
     get_user(request)
@@ -525,9 +541,9 @@ async def create_item(request: Request):
     d = await request.json()
     sku = validated_text(d, 'sku', max_len=50).upper()
     name = validated_text(d, 'name', max_len=160)  # Existing name is scientific item name.
-    cat = validated_text(d, 'category', max_len=80)  # Book / register classification.
     branch = require_branch(d.get('branch'))
     restrict_branch(u, branch)
+    cat = require_book(branch, d.get('category'))  # Official branch-specific register.
     unit = validated_text(d, 'unit', max_len=30)
     generic, manufacturer, mfg, exp, info = item_details(d)
     try:
@@ -551,8 +567,8 @@ async def update_item(item_id: int, request: Request):
     d = await request.json()
     sku = validated_text(d, 'sku', max_len=50).upper()
     name = validated_text(d, 'name', max_len=160)
-    category = validated_text(d, 'category', max_len=80)
     branch = require_branch(d.get('branch'))
+    category = validated_text(d, 'category', max_len=80)
     unit = validated_text(d, 'unit', max_len=30)
     generic, manufacturer, mfg, exp, info = item_details(d)
     try:
@@ -562,6 +578,7 @@ async def update_item(item_id: int, request: Request):
                 err(404, 'Item not found')
             restrict_branch(u, old['branch'])
             restrict_branch(u, branch)
+            category = require_book(branch, category)
             has_movements = c.execute('SELECT 1 FROM movement_lines l JOIN batches b ON l.batch_id=b.id WHERE b.item_id=? LIMIT 1', (item_id,)).fetchone()
             if has_movements and old['unit'] != unit:
                 err(409, 'Cannot change the unit after stock movements have been recorded')

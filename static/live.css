@@ -31,3 +31,7 @@
 .db-toolbar #itemBranchFilter,.db-toolbar #itemBookFilter{width:auto;flex:0 1 190px;max-width:220px;min-width:145px}
 .branch-select:disabled{color:#416b79;background:#eaf5f6;border:1px solid #bcdadd;opacity:1;cursor:not-allowed;font-weight:700}
 @media(max-width:700px){.db-toolbar #itemBranchFilter,.db-toolbar #itemBookFilter{flex:1 1 140px;min-width:0;max-width:none}}
+
+/* V4.3 — mandatory predefined book selector and legacy classification warning. */
+.legacy-book-warning{display:block;margin-top:7px;padding:9px 10px;border-radius:10px;background:#fff6e3;color:#83590e;border:1px solid #f1d9a2;font-weight:600;line-height:1.55}
+.db-select[data-item-book]:disabled{opacity:.65;cursor:not-allowed}

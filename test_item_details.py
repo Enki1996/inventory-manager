@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as tmp:
         new_item={'sku':'MED-001','name':'Amoxicillin Trihydrate','generic_name':'Amoxicillin',
                   'manufacturer':'Al Razi Pharmaceuticals','manufacture_date':'2026-01-15',
                   'expiry_date':'2029-01-15','information':'اموكسيل، موكس، Amoxil; مضاد حيوي',
-                  'category':'سجل الحياتية','branch':'medication','unit':'capsule'}
+                  'category':'سجل الحياتية - قسم الصيدلة','branch':'medication','unit':'capsule'}
         r=cl.post('/api/items',json=new_item,headers=h)
         assert r.status_code==200,r.text
         new_id=r.json()['id']

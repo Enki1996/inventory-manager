@@ -1,4 +1,4 @@
-# Railway shared testing setup — Hospital Warehouse IMS V4.2
+# Railway shared testing setup — Hospital Warehouse IMS V4.3
 
 This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default). Version 4.2 adds fixed warehouse branches, a book/register category field, and per-employee branch permissions using an additive database migration. **Download and safely store a current database backup before updating an existing Railway deployment.** Keep the `/data` volume attached to the same service.
 
@@ -9,7 +9,7 @@ This package contains the Home, Login, Dashboard, API, SQLite schema and bilingu
 
 ## 1. Make a code repository
 
-A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.2 project to the repository root (not its enclosing folder).
+A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.3 project to the repository root (not its enclosing folder).
 
 B. In Railway -> New Project -> Deploy from GitHub Repo -> select the repository.
 
@@ -43,7 +43,7 @@ After login, create a test operator and test viewer from Users & Permissions, th
 ## 5. Verify persistence and permissions
 
 1. Create Department `ER` / Emergency.
-2. Add Item `MED-TEST-001` / Sample Vial; choose the **Medication** branch and a book category such as **سجل الحياتية**.
+2. Add Item `MED-TEST-001` / Sample Vial; choose the **Medication** branch and the official book **سجل الحياتية - قسم الصيدلة**.
 3. Receive 100 units with a fabricated batch and expiry date, using an incoming document reference.
 4. Issue 20 to ER using a fabricated paper requisition number.
 5. Refresh, sign out, sign in and verify 80 remain.
@@ -68,7 +68,7 @@ This is not production-ready: no full security audit, no centralized rate-limiti
 
 ## Updating an existing V4.1 Railway test deployment
 
-**Download a backup first.** Do not remove or replace the attached `/data` volume, and do not upload a database file to GitHub. Update the existing private GitHub repository with the V4.2 code. Railway redeploys the application, which automatically adds `items.branch` and `users.branch` to the SQLite database without deleting records. Existing historical items and staff cannot be assigned a branch automatically without guessing; the admin must edit them and choose one of the fixed branches. Read `BRANCHES_AND_BOOKS_V4_2.md` for the detailed rules.
+**Download a backup first.** Do not remove or replace the attached `/data` volume, and do not upload a database file to GitHub. Update the existing private GitHub repository with the V4.3 code. Railway redeploys the application, which automatically adds `items.branch` and `users.branch` to the SQLite database without deleting records. Existing historical items and staff cannot be assigned a branch automatically without guessing; the admin must edit them and choose one of the fixed branches. Read `BRANCHES_AND_BOOKS_V4_2.md` for the detailed rules.
 
 ### Bilingual UI
 

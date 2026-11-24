@@ -1,4 +1,4 @@
-# Editing Arabic and English terminology — V4.2
+# Editing Arabic and English terminology — V4.3
 
 The site is **Arabic-first**; staff may switch to English from every page. The selection persists in their individual browser.
 
@@ -30,13 +30,13 @@ English source labels appear in the HTML/JS page files under `static/`. If chang
 
 Keep your existing Railway /data volume; update the **code**, not the database file. Configure a strong bootstrap admin password in Railway secrets as described in `RAILWAY_SETUP.md`. The old local testing password `123` must never be used on a public Railway deployment.
 
-## V4.2 item terminology
+## V4.3 item terminology
 
 Additional editable keys in `static/locales/ar.json` include `Scientific item name`, `Generic name`, `Manufacturer company`, `Manufacture date (optional)`, `Expiration date (optional)`, and `Information / alternate names`.
 
 The information field accepts multiple aliases, slang terms and free-form notes in Arabic or English. Item searches check this text without translating or overwriting the saved values.
 
-## V4.2 branch and register terms
+## V4.3 branch and register terms
 
 - `Warehouse branch` → `فرع المخزن`
 - `Medication` → `الأدوية`
@@ -45,4 +45,4 @@ The information field accepts multiple aliases, slang terms and free-form notes 
 - `Book / register category` → `التصنيف حسب السجل أو الدفتر`
 - `Assigned branch` → `الفرع المخصص`
 
-Book/register labels entered by staff, such as `سجل الحياتية`, are stored as inventory data and are **not** automatically translated; they remain searchable in their original form.
+Book/register labels are now **selected from the approved list** for each branch, instead of typed by staff. The official Arabic titles live in `book_catalog.py` and remain in Arabic in both language modes; they are stored as inventory data and are not machine-translated. To rename an official register, update the catalog and plan how older saved classifications should be reconciled.

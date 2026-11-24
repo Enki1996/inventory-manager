@@ -432,5 +432,13 @@
   "All books / registers": "جميع السجلات والدفاتر",
   "Warehouse branch not assigned.": "لم يتم تحديد فرع المخزن للحساب.",
   "Ask your administrator to assign your account to one branch before managing stock.": "اطلب من مسؤول النظام تخصيص فرع واحد لحسابك قبل إجراء حركات المخزون.",
-  "Medication, Medical Supplies, Surgical Instruments": "الأدوية، المستلزمات الطبية، الأدوات الجراحية"
+  "Medication, Medical Supplies, Surgical Instruments": "الأدوية، المستلزمات الطبية، الأدوات الجراحية",
+  "Select a book / register": "اختر السجل أو الدفتر",
+  "Select an approved book / register for the chosen warehouse branch": "اختر سجلاً معتمداً تابعاً لفرع المخزن المحدد",
+  "Books are predefined for each branch; select the matching register.": "لكل فرع سجلات محددة مسبقاً؛ اختر السجل الذي ينتمي إليه الصنف.",
+  "Choose one of the official books for the selected warehouse branch.": "اختر أحد السجلات المعتمدة لفرع المخزن المحدد.",
+  "Choose the warehouse branch, then its official book / register. Dates here are catalog references; batch expiry is entered when receiving stock.": "اختر فرع المخزن ثم السجل المعتمد التابع له. التواريخ هنا مرجعية للصنف، أما الصلاحية الفعلية فتسجل لكل تشغيلة عند الاستلام.",
+  "Legacy / needs review": "سجلات قديمة تحتاج إلى مراجعة",
+  "Existing category:": "التصنيف السابق:",
+  "please choose an approved book for this branch.": "يرجى اختيار سجل معتمد لهذا الفرع."
 }
