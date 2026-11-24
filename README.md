@@ -1,80 +1,41 @@
-# Hospital Warehouse IMS V4.1 — expanded item details
+# Hospital Warehouse IMS V4.2 — Three branches and book/register categories
 
-**New in V4.1 (Arabic first / English available):** The Inventory → Add/Edit Item form now includes scientific name (existing item name), generic name, manufacturer company, manufacture date, expiration date, and a searchable free-text **Information / alternate names** field. The former low-stock threshold input is removed from both item forms. The warehouse database, user roles, shipment and batch workflows remain in place.
+This is the **Arabic-first bilingual** hospital warehouse test app with a real backend and SQLite database. The application includes Home, Login, Dashboard, Inventory, Department destinations, Incoming/Outgoing Shipments, Batches, Returns, Movement History, Accounts & Permissions, and portable Backup & Restore.
 
-**Item dates are catalog reference information, not received-stock batch dates.** The receiving screen continues to ask for the actual expiry of each incoming batch, and stock expiry alerts and distribution validation use those batch dates, not the catalog reference date. Not all supplies expire; reference dates are optional. Details in `ITEM_FIELDS_V4_1.md`.
+## New in V4.2
 
-**Existing live database preservation:** V4.1 automatically adds five optional columns to the V4 database on first launch, without erasing items, movements, batches, accounts, or existing low-stock settings. Keep your existing Railway `/data` volume and update code only. The new backup format is schema V2; the restore endpoint also upgrades a compatible V4/V3 backup with schema V1. Before updating a live instance, manually download a backup and retain an off-server copy.
+- Exactly three fixed branches: **Medication (الأدوية)**, **Medical Supplies (المستلزمات الطبية)**, **Surgical Instruments (الأدوات الجراحية)**.
+- Every new item belongs to one fixed branch. Its independent **Book / Register Category (التصنيف حسب السجل)** is a flexible text field (e.g. **سجل الحياتية**) with suggestions and inventory search/filtering.
+- When creating a staff account, an admin assigns exactly one branch to each non-admin employee. Admins have all-branch access.
+- Add/Edit Item shows a disabled, fixed branch selector for staff. The server enforces the same restriction on item writes, incoming receipts, outgoing distributions, returns, and stock corrections.
+- Existing V4.1 item details, Arabic/English language switching, movement history, batches, expiry dates, backup exports and restores remain in place.
 
----
+Details and migration behavior: **[`BRANCHES_AND_BOOKS_V4_2.md`](BRANCHES_AND_BOOKS_V4_2.md)**. Arabic wording can be updated at `static/locales/ar.json`; see `TRANSLATIONS.md`.
 
-# Previous release: V4.0 Arabic-first bilingual app
+## Run locally (demo only)
 
-**New in V4:** Arabic is the default interface language on Home, Login and every Dashboard screen. An العربية / EN switch appears across these pages, stores the browser preference, and changes layout direction (RTL ↔ LTR). The warehouse terminology is editable at `static/locales/ar.json`. V4.1 performs an additive database schema migration.
+Extract the project. On Windows, double-click `run_windows.bat` with Python 3.11+ installed. For macOS/Linux run `./run_mac_linux.sh`. Alternatively run `pip install -r requirements.txt` and `uvicorn app:app --host 127.0.0.1 --port 8000`.
 
-Read `TRANSLATIONS.md` for Arabic wording changes. See `RAILWAY_SETUP.md` for live deployment.
+Open `http://127.0.0.1:8000`, log in as `enki / 123` **only for local demo testing**, then change the password. Do not use this password on a public Railway server. The application must be served by Python; double-clicking HTML files alone will not work.
 
-**For Internet testing on Railway, follow [`RAILWAY_SETUP.md`](RAILWAY_SETUP.md) first. The default local `enki / 123` credentials are BLOCKED on public deployments; use a strong private Railway bootstrap secret.**
+## Testing workflow
 
-# Hospital Warehouse IMS — V4.0 Railway-Ready Shared Testing Prototype
+1. Create a department destination (e.g. ER).
+2. Create an item. Select Medication (or another branch) and enter a book category such as `سجل الحياتية`.
+3. Receive a shipment with a paper reference, batch number and actual batch expiry.
+4. Distribute part of the stock to a department using its paper requisition serial number.
+5. Create a **Manager** account assigned to Medication; confirm it cannot edit or move Surgical Instruments.
+6. Try filtering the inventory by branch and by book/register classification.
+7. Download a full database backup to your PC or phone and keep it securely.
 
-This is the **first database-connected test build** of the same home, login and light-themed dashboard. It is a **web application**, not a standalone static HTML website. The local FastAPI server handles accounts and permissions and stores actual records in a SQLite database file.
+Data is stored in `data/warehouse.sqlite3` locally, or in `/data/warehouse.sqlite3` on Railway when a volume is attached. Never commit a live SQLite file to GitHub.
 
-## Start on Windows
+## Deployment and preservation
 
-1. Install Python 3.11 or later from python.org (select **Add Python to PATH**).
-2. Extract the full ZIP. Double-click **run_windows.bat**.
-3. Let the command window remain open while using the app.
-4. Open **http://127.0.0.1:8000** in Chrome/Edge.
-5. Click Login. **Test administrator: `enki` / `123`**.
+See **[`RAILWAY_SETUP.md`](RAILWAY_SETUP.md)** for private GitHub -> Railway instructions. Updating V4.1 to V4.2 changes the database **additively**, preserving items, movements, users and stock. Old items/staff must be assigned to a branch by the administrator before branch-restricted editing is possible. **Back up first and retain the existing Railway volume.**
 
-Mac/Linux: `./run_mac_linux.sh`. Alternatively, `python -m pip install -r requirements.txt` followed by `python -m uvicorn app:app --host 127.0.0.1 --port 8000`.
+The app currently uses one FastAPI worker and one SQLite database on a persistent volume, suitable only for controlled multi-user testing. Before real hospital use, strengthen the architecture, deploy operational backups off-site, audit permissions and recoveries, and complete security review. Database backup ZIPs are not encrypted.
 
-**Do not open the HTML files directly by double-clicking.** They communicate with local server API endpoints, and will not function as a static file-only site.
+## Developer verification
 
-## Try the workflow
-
-1. Add a department in **Departments** (e.g. `ER`, Emergency).
-2. Add an item in **Inventory** (e.g. `MED-001`, Paracetamol 500mg, unit Tablet).
-3. Receive an incoming shipment and enter a **receipt paper reference, batch number, expiration date and quantity**.
-4. Distribute items to a department using **Distribute to Departments** and its **paper requisition number**.
-5. Inspect **Movement History** and **Batches & Expiry**.
-6. In **Users & Permissions**, create a staff account and choose a role. Test logging out and signing in as the staff member. Their navigation and server permissions differ.
-7. In **Settings**, change the initial admin password. Export a full database ZIP under **Backup & Restore**.
-
-## Real data storage
-
-Created automatically when the application first runs:
-
-`data/warehouse.sqlite3`
-
-Do not delete the file if you want to preserve the data. All save actions go through the backend, and the database persists between restarts. The `data/` folder is intentionally not included in the downloadable project, so each new installation starts clean.
-
-Passwords are salted and hashed with PBKDF2-SHA256. Auth uses an HTTP-only SameSite session cookie and mutation-specific CSRF tokens. Server permissions:
-
-| Role | Rights |
-| ---- | ------ |
-| Admin | All records, staff/roles, database export/restore |
-| Manager | Manage items/departments, receipts, distribution, returns, corrections |
-| Operator | View items and departments; record receipt, issue, returns |
-| Viewer | Read-only warehouse records and reports |
-
-Admin accounts cannot deactivate themselves, and the last active administrator is protected.
-
-## Portable backups
-
-**Backup & Restore** uses a full database snapshot packaged as a ZIP with a SHA-256 checksum and schema version. Administrator can download the file to a PC/phone and later upload it. The restore process checks integrity and schema, makes a safety copy in `data/safety_backups/`, replaces the database and signs out all sessions.
-
-Backups are **not encrypted** in this early build. Treat the exported ZIP as sensitive: it includes warehouse records and hashed credentials. Do not share it casually. This initial test build does **not** yet offer scheduled off-site backups. Please store downloaded backups in a safe place, and avoid restoring over newer entries casually.
-
-## Hosting
-
-This runs locally for testing; it is **not connected to an internet-hosted database yet**. To deploy it to Railway for testing, use a Python service, set a persistent volume for `WAREHOUSE_DATA_DIR=/data`, run `uvicorn app:app --host 0.0.0.0 --port $PORT`, set `COOKIE_SECURE=1`, protect the database and secure the public URL with HTTPS. For serious multi-user hospital usage, migrate from this single-process SQLite prototype to PostgreSQL, add scheduled off-site backups, conduct security checks, and replace the test password.
-
-### Security notice
-
-The user-requested initial password `123` is **not safe**. Use only with fake test data in a trusted local environment, change it from Settings immediately and **never expose this initial account publicly**. Never use real hospital inventory records or staff secrets in this prototype until production-hardening, data protections and validation have been completed.
-
-## Development verification
-
-`python test_flow.py` uses a disposable database and tests login, CSRF, receiving, issue, oversell prevention, user permissions, backup export and restore. The test file never alters your live `data/warehouse.sqlite3`.
+`python test_flow.py`, `python test_item_details.py`, `python test_branches.py`, `python test_upgrade_from_v41.py` verify stock operations, branch enforcement, migration and backup compatibility using temporary databases. They don't change your actual warehouse database.

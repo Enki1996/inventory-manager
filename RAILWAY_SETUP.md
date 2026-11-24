@@ -1,6 +1,6 @@
-# Railway shared testing setup — Hospital Warehouse IMS V4.1
+# Railway shared testing setup — Hospital Warehouse IMS V4.2
 
-This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default). Version 4.1 expands item details and performs an additive database migration on startup. **Download and safely store a current database backup before updating an existing Railway deployment.** Keep the `/data` volume attached to the same service.
+This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default). Version 4.2 adds fixed warehouse branches, a book/register category field, and per-employee branch permissions using an additive database migration. **Download and safely store a current database backup before updating an existing Railway deployment.** Keep the `/data` volume attached to the same service.
 
 ## Before you start
 - This is a **testing environment**, not a production-ready medical inventory service. Use fictitious data, no real credentials or confidential records.
@@ -9,7 +9,7 @@ This package contains the Home, Login, Dashboard, API, SQLite schema and bilingu
 
 ## 1. Make a code repository
 
-A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.1 project to the repository root (not its enclosing folder).
+A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.2 project to the repository root (not its enclosing folder).
 
 B. In Railway -> New Project -> Deploy from GitHub Repo -> select the repository.
 
@@ -43,12 +43,12 @@ After login, create a test operator and test viewer from Users & Permissions, th
 ## 5. Verify persistence and permissions
 
 1. Create Department `ER` / Emergency.
-2. Add Item `MED-TEST-001` / Sample Vial.
+2. Add Item `MED-TEST-001` / Sample Vial; choose the **Medication** branch and a book category such as **سجل الحياتية**.
 3. Receive 100 units with a fabricated batch and expiry date, using an incoming document reference.
 4. Issue 20 to ER using a fabricated paper requisition number.
 5. Refresh, sign out, sign in and verify 80 remain.
 6. Re-deploy and verify the records still exist.
-7. Sign in as a Viewer and verify they cannot create or edit items.
+7. Create a Manager in the Medication branch and verify they cannot edit or issue stock belonging to the Surgical Instruments branch. Also test a Viewer (read only).
 8. Export a backup ZIP in Backup & Restore, store it privately.
 
 ## 6. Backups
@@ -66,14 +66,13 @@ This is not production-ready: no full security audit, no centralized rate-limiti
 - *My data disappeared*: verify Railway has a volume mounted at `/data` and the environment variable `WAREHOUSE_DATA_DIR=/data` matches.
 - *I can log in but cookies fail*: ensure the domain uses HTTPS and `COOKIE_SECURE=1`.
 
-## Updating an existing V3.1 Railway test deployment
+## Updating an existing V4.1 Railway test deployment
 
-If the V3.1 app is already deployed, **do not delete the attached /data volume** and do not upload a database file into GitHub. Commit the V4 files into the same private GitHub repository and Railway can redeploy the code. The SQLite schema is unchanged and existing records remain on the persistent volume. Make a fresh Backup & Restore export first.
+**Download a backup first.** Do not remove or replace the attached `/data` volume, and do not upload a database file to GitHub. Update the existing private GitHub repository with the V4.2 code. Railway redeploys the application, which automatically adds `items.branch` and `users.branch` to the SQLite database without deleting records. Existing historical items and staff cannot be assigned a branch automatically without guessing; the admin must edit them and choose one of the fixed branches. Read `BRANCHES_AND_BOOKS_V4_2.md` for the detailed rules.
 
 ### Bilingual UI
 
-- Default on new browsers: **العربية**, with right-to-left page layout.
-- Switch to **EN** on Home, Login or Dashboard for left-to-right English.
-- Language preference is stored in that browser. It is not a shared account setting.
-- Change UI terms and labels in `static/locales/ar.json`, not in `app.py` and not in the database.
-- Item names, department names, requisition codes and user-entered notes remain exactly as staff entered them. Bilingual data fields for product and department names can be added in a later database version.
+- Default for new browsers: **العربية**, with right-to-left page layout.
+- **EN** switches to English, with left-to-right layout.
+- Language preference is browser-local, and medical product names or user-entered data remain exactly as saved.
+- Interface terminology is editable at `static/locales/ar.json`.

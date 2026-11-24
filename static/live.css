@@ -20,9 +20,14 @@
 @media(max-width:1130px){.db-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.db-layout{grid-template-columns:1fr}}
 @media(max-width:700px){.db-grid{grid-template-columns:1fr}.db-kpis{gap:9px}.db-kpi{padding:13px}.db-kpi .num{font-size:23px}.db-kpi .name{font-size:10px}.db-head{flex-direction:column}.db-head h1{font-size:22px}.db-panel{padding:13px}.ship-line,.ship-line.issue{grid-template-columns:1fr 1fr}.ship-line .db-field:first-child{grid-column:1/-1}.modal-body{padding:18px}}
 
-/* V4.1 — wider item editor and readable alternate names. */
+/* V4.2 — wider item editor and readable alternate names. */
 .modal-body.item-dialog{width:min(780px,100%)}
 .item-alias{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.6}
 .item-dialog .db-textarea{min-height:94px}
 .item-dialog .db-field small{font-size:10px;line-height:1.6}
 @media(max-width:700px){.modal-body.item-dialog{width:100%}.item-alias{max-width:170px}}
+
+/* V4.2 — branch and register filters, visibly locked staff branch selection. */
+.db-toolbar #itemBranchFilter,.db-toolbar #itemBookFilter{width:auto;flex:0 1 190px;max-width:220px;min-width:145px}
+.branch-select:disabled{color:#416b79;background:#eaf5f6;border:1px solid #bcdadd;opacity:1;cursor:not-allowed;font-weight:700}
+@media(max-width:700px){.db-toolbar #itemBranchFilter,.db-toolbar #itemBookFilter{flex:1 1 140px;min-width:0;max-width:none}}

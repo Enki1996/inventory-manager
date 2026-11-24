@@ -45,7 +45,8 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 PUBLIC_DEPLOY = os.getenv('WAREHOUSE_PUBLIC_DEPLOY', '').strip() == '1'
 SESSION_HOURS = 12
 ROLES = ('admin', 'manager', 'operator', 'viewer')
@@ -144,6 +145,41 @@ def migrate_item_details(c: sqlite3.Connection):
               "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 
 
+def require_branch(value, *, allow_unassigned=False):
+    """Only these three branches can own inventory; NULL marks legacy records."""
+    if value in BRANCHES:
+        return value
+    if allow_unassigned and value in (None, ''):
+        return None
+    err(422, 'Choose one of the three warehouse branches')
+
+
+def restrict_branch(user, branch):
+    """Permission scope is checked server-side for every individual item/line."""
+    if user['role'] == 'admin':
+        return
+    if not user['branch'] or branch != user['branch']:
+        err(403, 'Your account may modify items only in its assigned warehouse branch')
+
+
+def user_branch_from_request(role, value):
+    if role == 'admin':
+        return None  # Administrative account is the explicit cross-branch exception.
+    return require_branch(value)
+
+
+def migrate_branches(c: sqlite3.Connection):
+    """Additive migration: leave old items/staff unassigned, never guess a branch."""
+    users_cols = {row[1] for row in c.execute('PRAGMA table_info(users)')}
+    if 'branch' not in users_cols:
+        c.execute('ALTER TABLE users ADD COLUMN branch TEXT')
+    item_cols = {row[1] for row in c.execute('PRAGMA table_info(items)')}
+    if 'branch' not in item_cols:
+        c.execute('ALTER TABLE items ADD COLUMN branch TEXT')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
 def item_details(d):
     """Optional catalog metadata; individual received batches have their own expiry."""
     generic_name = validated_text(d, 'generic_name', required=False, max_len=160)
@@ -168,6 +204,7 @@ def init_db():
                 role TEXT NOT NULL CHECK(role IN ('admin','manager','operator','viewer')),
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
                 must_change_password INTEGER NOT NULL DEFAULT 0,
+                branch TEXT CHECK(branch IN ('medication','medical_supplies','surgical_instruments') OR branch IS NULL),
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sessions (
@@ -188,6 +225,7 @@ def init_db():
                 sku TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 name TEXT NOT NULL,
                 category TEXT NOT NULL,
+                branch TEXT CHECK(branch IN ('medication','medical_supplies','surgical_instruments') OR branch IS NULL),
                 unit TEXT NOT NULL,
                 min_stock INTEGER NOT NULL DEFAULT 0 CHECK(min_stock >= 0),
                 generic_name TEXT NOT NULL DEFAULT '',
@@ -234,6 +272,7 @@ def init_db():
             );
         ''')
         migrate_item_details(c)
+        migrate_branches(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
             old = c.execute("SELECT password_hash FROM users WHERE username='enki'").fetchone()
@@ -290,7 +329,7 @@ def get_user(request: Request, *, require_csrf=False):
     if len(sid) != 64:
         err(401, 'Sign in required')
     with db(readonly=True) as c:
-        row = c.execute('''SELECT u.id,u.username,u.full_name,u.role,u.is_active,u.must_change_password,s.csrf
+        row = c.execute('''SELECT u.id,u.username,u.full_name,u.role,u.is_active,u.must_change_password,u.branch,s.csrf
                            FROM sessions s JOIN users u ON s.user_id=u.id
                            WHERE s.token_hash=? AND s.expires_at>?''',
                         (hashlib.sha256(sid.encode()).hexdigest(), now())).fetchone()
@@ -393,7 +432,7 @@ async def login(request: Request):
 def me(request: Request):
     u = get_user(request)
     return {'id': u['id'], 'username': u['username'], 'full_name': u['full_name'], 'role': u['role'],
-            'must_change_password': bool(u['must_change_password']), 'csrf': u['csrf'], 'permissions': sorted(WRITE_PERMS[u['role']])}
+            'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'permissions': sorted(WRITE_PERMS[u['role']])}
 
 
 @app.post('/api/logout')
@@ -476,7 +515,7 @@ def list_items(request: Request):
     with db(readonly=True) as c:
         return [dict(x) for x in c.execute('''SELECT i.*,COALESCE(SUM(b.on_hand),0) stock,COUNT(b.id) batch_count
                                              FROM items i LEFT JOIN batches b ON b.item_id=i.id GROUP BY i.id
-                                             ORDER BY i.active DESC,i.name''')]
+                                             ORDER BY i.active DESC,i.branch,i.category,i.name''')]
 
 
 @app.post('/api/items')
@@ -486,16 +525,18 @@ async def create_item(request: Request):
     d = await request.json()
     sku = validated_text(d, 'sku', max_len=50).upper()
     name = validated_text(d, 'name', max_len=160)  # Existing name is scientific item name.
-    cat = validated_text(d, 'category', max_len=80)
+    cat = validated_text(d, 'category', max_len=80)  # Book / register classification.
+    branch = require_branch(d.get('branch'))
+    restrict_branch(u, branch)
     unit = validated_text(d, 'unit', max_len=30)
     generic, manufacturer, mfg, exp, info = item_details(d)
     try:
         with db() as c:
-            q = c.execute('''INSERT INTO items(sku,name,category,unit,generic_name,manufacturer,
+            q = c.execute('''INSERT INTO items(sku,name,category,branch,unit,generic_name,manufacturer,
                             manufacture_date,expiry_date,information,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                          (sku,name,cat,unit,generic,manufacturer,mfg,exp,info,now()))
-            audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                          (sku,name,cat,branch,unit,generic,manufacturer,mfg,exp,info,now()))
+            audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'branch':branch,'book_category':cat,
                   'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
                   'expiry_date':exp,'information':info})
             return {'ok': True, 'id': q.lastrowid}
@@ -511,6 +552,7 @@ async def update_item(item_id: int, request: Request):
     sku = validated_text(d, 'sku', max_len=50).upper()
     name = validated_text(d, 'name', max_len=160)
     category = validated_text(d, 'category', max_len=80)
+    branch = require_branch(d.get('branch'))
     unit = validated_text(d, 'unit', max_len=30)
     generic, manufacturer, mfg, exp, info = item_details(d)
     try:
@@ -518,15 +560,19 @@ async def update_item(item_id: int, request: Request):
             old = c.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
             if not old:
                 err(404, 'Item not found')
+            restrict_branch(u, old['branch'])
+            restrict_branch(u, branch)
             has_movements = c.execute('SELECT 1 FROM movement_lines l JOIN batches b ON l.batch_id=b.id WHERE b.item_id=? LIMIT 1', (item_id,)).fetchone()
             if has_movements and old['unit'] != unit:
                 err(409, 'Cannot change the unit after stock movements have been recorded')
-            c.execute('''UPDATE items SET sku=?,name=?,category=?,unit=?,generic_name=?,
+            if has_movements and old['branch'] is not None and old['branch'] != branch:
+                err(409, 'Cannot transfer an item to another branch after movements were recorded')
+            c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,
                          manufacturer=?,manufacture_date=?,expiry_date=?,information=?,active=?
                          WHERE id=?''',
-                      (sku,name,category,unit,generic,manufacturer,mfg,exp,info,
+                      (sku,name,category,branch,unit,generic,manufacturer,mfg,exp,info,
                        1 if d.get('active',True) else 0,item_id))
-            audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,
+            audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'branch':branch,'book_category':category,
                   'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
                   'expiry_date':exp,'information':info})
         return {'ok': True}
@@ -539,7 +585,7 @@ def batches(request: Request):
     get_user(request)
     with db(readonly=True) as c:
         return [dict(x) for x in c.execute('''SELECT b.id,b.item_id,b.batch_no,b.expiry_date,b.on_hand,
-                                             i.sku,i.name item_name,i.unit,i.category,i.active item_active
+                                             i.sku,i.name item_name,i.unit,i.category,i.branch,i.active item_active
                                              FROM batches b JOIN items i ON i.id=b.item_id
                                              ORDER BY b.on_hand DESC,i.name,b.expiry_date''')]
 
@@ -609,9 +655,10 @@ async def create_movement(request: Request):
                 iid = integer(line,'item_id',1)
                 batchno = validated_text(line,'batch_no',max_len=90)
                 exp = dated(line.get('expiry_date'))
-                item = c.execute('SELECT id FROM items WHERE id=? AND active=1', (iid,)).fetchone()
+                item = c.execute('SELECT id,branch FROM items WHERE id=? AND active=1', (iid,)).fetchone()
                 if not item:
                     err(422, 'Selected item does not exist or is inactive')
+                restrict_branch(u, item['branch'])
                 conflicting = c.execute('''SELECT id FROM batches WHERE item_id=? AND batch_no=? AND COALESCE(expiry_date,'')<>COALESCE(?,'')''',
                                         (iid,batchno,exp)).fetchone()
                 if conflicting:
@@ -625,10 +672,11 @@ async def create_movement(request: Request):
                                          (iid,batchno,exp,now())).lastrowid
             else:
                 batch_id = integer(line,'batch_id',1)
-                batch = c.execute('''SELECT b.id,b.expiry_date,i.active item_active FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?''',
+                batch = c.execute('''SELECT b.id,b.expiry_date,i.branch,i.active item_active FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?''',
                                   (batch_id,)).fetchone()
                 if not batch or not batch['item_active']:
                     err(422,'Batch not found or product is inactive')
+                restrict_branch(u, batch['branch'])
                 if kind == 'OUT' and batch['expiry_date'] and batch['expiry_date'] < dt.datetime.now(ZoneInfo('Asia/Baghdad')).date().isoformat():
                     err(409, 'Cannot issue expired stock')
             if direction > 0:
@@ -664,7 +712,7 @@ def list_users(request: Request):
     u = get_user(request)
     permit(u,'users')
     with db(readonly=True) as c:
-        return [dict(x) for x in c.execute('''SELECT id,username,full_name,role,is_active,must_change_password,created_at
+        return [dict(x) for x in c.execute('''SELECT id,username,full_name,role,branch,is_active,must_change_password,created_at
                                                FROM users ORDER BY is_active DESC,id''')]
 
 
@@ -680,14 +728,15 @@ async def create_user(request: Request):
     role = str(d.get('role',''))
     if role not in ROLES:
         err(422,'Select a valid role')
+    branch = user_branch_from_request(role, d.get('branch'))
     password = str(d.get('password',''))
     if not 8<=len(password)<=128:
         err(422,'New account password must contain 8 to 128 characters')
     try:
         with db() as c:
-            new_id = c.execute('''INSERT INTO users(username,password_hash,full_name,role,created_at,must_change_password)
-                                  VALUES (?,?,?,?,?,1)''', (username,pw_hash(password),name,role,now())).lastrowid
-            audit(c,u['id'],'USER_CREATED',{'id':new_id,'username':username,'role':role})
+            new_id = c.execute('''INSERT INTO users(username,password_hash,full_name,role,branch,created_at,must_change_password)
+                                  VALUES (?,?,?,?,?,?,1)''', (username,pw_hash(password),name,role,branch,now())).lastrowid
+            audit(c,u['id'],'USER_CREATED',{'id':new_id,'username':username,'role':role,'branch':branch})
             return {'ok':True,'id':new_id}
     except sqlite3.IntegrityError:
         err(409,'Username already exists')
@@ -707,15 +756,16 @@ async def edit_user(user_id: int, request: Request):
         role = str(d.get('role', target['role']))
         if role not in ROLES:
             err(422,'Invalid role')
+        branch = user_branch_from_request(role, d.get('branch', target['branch']))
         active = 1 if d.get('is_active',bool(target['is_active'])) else 0
         if target['role']=='admin' and (role!='admin' or not active):
             active_admins = c.execute("SELECT COUNT(*) n FROM users WHERE role='admin' AND is_active=1").fetchone()['n']
             if active_admins<=1:
                 err(409,'You cannot remove the last active administrator')
-        c.execute('UPDATE users SET role=?,is_active=? WHERE id=?',(role,active,user_id))
-        if not active:
+        c.execute('UPDATE users SET role=?,branch=?,is_active=? WHERE id=?',(role,branch,active,user_id))
+        if role != target['role'] or branch != target['branch'] or not active:
             c.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
-        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'active':bool(active)})
+        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'branch':branch,'active':bool(active)})
     return {'ok':True}
 
 
@@ -801,7 +851,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 if info.file_size > 220*1024*1024:
                     err(413,'Uncompressed backup is too large')
                 manifest = json.loads(z.read('manifest.json'))
-                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, SCHEMA_VERSION):
+                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, 2, SCHEMA_VERSION):
                     err(422,'Not a compatible warehouse backup')
                 data = z.read('warehouse.sqlite3')
                 if hashlib.sha256(data).hexdigest()!=manifest.get('sha256'):
@@ -829,11 +879,13 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                     err(422, 'This older backup contains the insecure local admin password and cannot be restored to a public server. Change it before exporting.')
             if manifest['schema_version'] == 1:
                 migrate_item_details(verify)
+            if manifest['schema_version'] <= 2:
+                migrate_branches(verify)
                 verify.commit()
             else:
                 actual_columns = {row[1] for row in verify.execute('PRAGMA table_info(items)')}
-                if not {'generic_name','manufacturer','manufacture_date','expiry_date','information'}.issubset(actual_columns):
-                    err(422, 'Backup declares V2 but is missing item detail fields')
+                if not {'generic_name','manufacturer','manufacture_date','expiry_date','information','branch'}.issubset(actual_columns):
+                    err(422, 'Backup declares V3 but is missing item/branch fields')
         except sqlite3.DatabaseError:
             err(422,'Invalid SQLite backup contents')
         finally:
