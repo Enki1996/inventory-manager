@@ -45,7 +45,7 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PUBLIC_DEPLOY = os.getenv('WAREHOUSE_PUBLIC_DEPLOY', '').strip() == '1'
 SESSION_HOURS = 12
 ROLES = ('admin', 'manager', 'operator', 'viewer')
@@ -128,6 +128,34 @@ def bootstrap_admin_password():
     return password
 
 
+def migrate_item_details(c: sqlite3.Connection):
+    """Additive V1 -> V2 migration, safe for existing records and backup imports."""
+    columns = {row[1] for row in c.execute('PRAGMA table_info(items)')}
+    for name, definition in (
+        ('generic_name', "TEXT NOT NULL DEFAULT ''"),
+        ('manufacturer', "TEXT NOT NULL DEFAULT ''"),
+        ('manufacture_date', 'TEXT'),
+        ('expiry_date', 'TEXT'),
+        ('information', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in columns:
+            c.execute(f'ALTER TABLE items ADD COLUMN {name} {definition}')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def item_details(d):
+    """Optional catalog metadata; individual received batches have their own expiry."""
+    generic_name = validated_text(d, 'generic_name', required=False, max_len=160)
+    manufacturer = validated_text(d, 'manufacturer', required=False, max_len=160)
+    manufacture_date = dated(d.get('manufacture_date'), 'manufacture_date')
+    expiry_date = dated(d.get('expiry_date'), 'expiry_date')
+    information = validated_text(d, 'information', required=False, max_len=2000)
+    if manufacture_date and expiry_date and manufacture_date > expiry_date:
+        err(422, 'Item expiration date must not be earlier than its manufacture date')
+    return generic_name, manufacturer, manufacture_date, expiry_date, information
+
+
 def init_db():
     with db() as c:
         c.executescript('''
@@ -162,6 +190,11 @@ def init_db():
                 category TEXT NOT NULL,
                 unit TEXT NOT NULL,
                 min_stock INTEGER NOT NULL DEFAULT 0 CHECK(min_stock >= 0),
+                generic_name TEXT NOT NULL DEFAULT '',
+                manufacturer TEXT NOT NULL DEFAULT '',
+                manufacture_date TEXT,
+                expiry_date TEXT,
+                information TEXT NOT NULL DEFAULT '',
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
@@ -200,7 +233,7 @@ def init_db():
                 created_at TEXT NOT NULL
             );
         ''')
-        c.execute("INSERT OR IGNORE INTO app_meta(key,value) VALUES ('schema_version',?)", (str(SCHEMA_VERSION),))
+        migrate_item_details(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
             old = c.execute("SELECT password_hash FROM users WHERE username='enki'").fetchone()
@@ -238,13 +271,13 @@ def integer(obj, key, minimum=0, maximum=100_000_000):
     return val
 
 
-def dated(s):
+def dated(s, field='expiry_date'):
     if s in ('', None):
         return None
     try:
         return dt.date.fromisoformat(str(s)).isoformat()
     except Exception:
-        err(422, 'expiry_date must be YYYY-MM-DD or empty')
+        err(422, f'{field} must be YYYY-MM-DD or empty')
 
 
 def audit(c, user_id, action, detail):
@@ -452,15 +485,19 @@ async def create_item(request: Request):
     permit(u, 'item_write')
     d = await request.json()
     sku = validated_text(d, 'sku', max_len=50).upper()
-    name = validated_text(d, 'name')
+    name = validated_text(d, 'name', max_len=160)  # Existing name is scientific item name.
     cat = validated_text(d, 'category', max_len=80)
     unit = validated_text(d, 'unit', max_len=30)
-    minimum = integer(d, 'min_stock')
+    generic, manufacturer, mfg, exp, info = item_details(d)
     try:
         with db() as c:
-            q = c.execute('INSERT INTO items(sku,name,category,unit,min_stock,created_at) VALUES (?,?,?,?,?,?)',
-                          (sku, name, cat, unit, minimum, now()))
-            audit(c, u['id'], 'ITEM_CREATED', {'id': q.lastrowid, 'sku': sku, 'name': name})
+            q = c.execute('''INSERT INTO items(sku,name,category,unit,generic_name,manufacturer,
+                            manufacture_date,expiry_date,information,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                          (sku,name,cat,unit,generic,manufacturer,mfg,exp,info,now()))
+            audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,
+                  'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
+                  'expiry_date':exp,'information':info})
             return {'ok': True, 'id': q.lastrowid}
     except sqlite3.IntegrityError:
         err(409, 'Item code already exists')
@@ -472,22 +509,26 @@ async def update_item(item_id: int, request: Request):
     permit(u, 'item_write')
     d = await request.json()
     sku = validated_text(d, 'sku', max_len=50).upper()
-    name = validated_text(d, 'name')
+    name = validated_text(d, 'name', max_len=160)
     category = validated_text(d, 'category', max_len=80)
     unit = validated_text(d, 'unit', max_len=30)
-    min_stock = integer(d, 'min_stock')
+    generic, manufacturer, mfg, exp, info = item_details(d)
     try:
         with db() as c:
             old = c.execute('SELECT * FROM items WHERE id=?', (item_id,)).fetchone()
             if not old:
                 err(404, 'Item not found')
-            # Unit changes after stock movement create ambiguity, so disallow.
             has_movements = c.execute('SELECT 1 FROM movement_lines l JOIN batches b ON l.batch_id=b.id WHERE b.item_id=? LIMIT 1', (item_id,)).fetchone()
             if has_movements and old['unit'] != unit:
                 err(409, 'Cannot change the unit after stock movements have been recorded')
-            c.execute('UPDATE items SET sku=?,name=?,category=?,unit=?,min_stock=?,active=? WHERE id=?',
-                      (sku,name,category,unit,min_stock,1 if d.get('active',True) else 0,item_id))
-            audit(c, u['id'], 'ITEM_UPDATED', {'id': item_id, 'name': name, 'sku': sku})
+            c.execute('''UPDATE items SET sku=?,name=?,category=?,unit=?,generic_name=?,
+                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,active=?
+                         WHERE id=?''',
+                      (sku,name,category,unit,generic,manufacturer,mfg,exp,info,
+                       1 if d.get('active',True) else 0,item_id))
+            audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,
+                  'generic_name':generic,'manufacturer':manufacturer,'manufacture_date':mfg,
+                  'expiry_date':exp,'information':info})
         return {'ok': True}
     except sqlite3.IntegrityError:
         err(409, 'Item code already exists')
@@ -760,7 +801,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 if info.file_size > 220*1024*1024:
                     err(413,'Uncompressed backup is too large')
                 manifest = json.loads(z.read('manifest.json'))
-                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version')!=SCHEMA_VERSION:
+                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, SCHEMA_VERSION):
                     err(422,'Not a compatible warehouse backup')
                 data = z.read('warehouse.sqlite3')
                 if hashlib.sha256(data).hexdigest()!=manifest.get('sha256'):
@@ -786,6 +827,13 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 admin = verify.execute('SELECT password_hash FROM users WHERE username=?', ('enki',)).fetchone()
                 if admin and pw_check('123', admin[0]):
                     err(422, 'This older backup contains the insecure local admin password and cannot be restored to a public server. Change it before exporting.')
+            if manifest['schema_version'] == 1:
+                migrate_item_details(verify)
+                verify.commit()
+            else:
+                actual_columns = {row[1] for row in verify.execute('PRAGMA table_info(items)')}
+                if not {'generic_name','manufacturer','manufacture_date','expiry_date','information'}.issubset(actual_columns):
+                    err(422, 'Backup declares V2 but is missing item detail fields')
         except sqlite3.DatabaseError:
             err(422,'Invalid SQLite backup contents')
         finally:

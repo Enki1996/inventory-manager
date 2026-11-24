@@ -1,15 +1,15 @@
-# Railway shared testing setup — Hospital Warehouse IMS V4.0
+# Railway shared testing setup — Hospital Warehouse IMS V4.1
 
-This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default).
+This package contains the Home, Login, Dashboard, API, SQLite schema and bilingual Arabic/English interface (Arabic default). Version 4.1 expands item details and performs an additive database migration on startup. **Download and safely store a current database backup before updating an existing Railway deployment.** Keep the `/data` volume attached to the same service.
 
 ## Before you start
 - This is a **testing environment**, not a production-ready medical inventory service. Use fictitious data, no real credentials or confidential records.
 - Public deployments do **not** accept the old local `enki / 123` password. On an empty database, the admin username is `enki` and its **initial password is the strong secret you set as an environment variable**.
-- The old local older local package still uses `enki / 123` for offline testing; it should NEVER be deployed publicly.
+- The local test package uses `enki / 123` for offline testing; it should NEVER be deployed publicly.
 
 ## 1. Make a code repository
 
-A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the `Hospital_Warehouse_IMS_Railway_V3_1` directory to the repository root (not its enclosing folder).
+A. Extract the provided ZIP. Create a new **private** GitHub repository. Upload the contents of the extracted V4.1 project to the repository root (not its enclosing folder).
 
 B. In Railway -> New Project -> Deploy from GitHub Repo -> select the repository.
 

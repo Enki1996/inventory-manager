@@ -1,4 +1,4 @@
-/* Live V4 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.1 bilingual warehouse prototype: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -32,7 +32,7 @@ async function refreshData(){
   if(can('users'))cache.users=await api('/api/users');
 }
 const selectOptions = (items,selected='',placeholder='Select one')=>`<option value="">${E(placeholder)}</option>`+items.map(o=>`<option value="${E(o.value)}" ${String(o.value)===String(selected)?'selected':''}>${E(o.label)}</option>`).join('');
-const itemOptions = ()=>selectOptions(cache.items.filter(x=>x.active).map(x=>({value:x.id,label:`${x.sku} · ${x.name} (${x.unit})`})),'','Select product');
+const itemOptions = ()=>selectOptions(cache.items.filter(x=>x.active).map(x=>({value:x.id,label:`${x.sku} · ${x.name}${x.generic_name?' / '+x.generic_name:''} (${x.unit})`})),'','Select product');
 const deptOptions = ()=>selectOptions(cache.departments.filter(x=>x.active).map(x=>({value:x.id,label:`${x.code} · ${x.name}`})),'','Choose department');
 const batchOptions = (includeExpired=false)=>selectOptions(cache.batches.filter(x=>x.item_active&&x.on_hand>0&&(includeExpired||!x.expiry_date||x.expiry_date>=new Date().toISOString().slice(0,10))).map(x=>({value:x.id,label:`${x.item_name} · Batch ${x.batch_no} · ${N(x.on_hand)} ${x.unit} · Exp ${x.expiry_date||'N/A'}`})),'','Select batch');
 const field=(label,input,help='')=>`<label class="db-field"><span>${E(label)}</span>${input}${help?`<small>${E(help)}</small>`:''}</label>`;
@@ -40,7 +40,26 @@ const inp=(name,placeholder='',type='text',other='')=>`<input class="db-input" n
 const head=(title,desc,actions='')=>`<div class="db-head"><div><span class="eyebrow">Central Warehouse / Live Workspace</span><h1>${E(title)}</h1><p>${E(desc)}</p></div>${actions?`<div class="db-actions">${actions}</div>`:''}</div>`;
 const panel=(title,content,icon='package')=>`<section class="db-panel"><h2>${I(icon)} ${E(title)}</h2>${content}</section>`;
 const table=(cols,rows)=>rows.length?`<div class="db-table-wrap"><table class="db-table"><thead><tr>${cols.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:msg('No records yet','Add your first record using the action button above.');
-function itemRows(items){return items.map(it=>`<tr><td><strong>${E(it.name)}</strong><div class="tiny">${E(it.sku)}</div></td><td>${E(it.category)}</td><td>${E(it.unit)}</td><td>${N(it.stock)}</td><td>${N(it.batch_count)}</td><td>${Number(it.min_stock)>0&&Number(it.stock)<Number(it.min_stock)?badge('Low stock','warning'):badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td>${can('item_write')?`<div class="db-small-actions"><button data-edit-item="${it.id}">Edit</button></div>`:'—'}</td></tr>`)}
+// Item catalog lookup: official, generic, company and colloquial/alternate names.
+const normalizeItemSearch = value=>String(value??'').toLocaleLowerCase().normalize('NFKC')
+ .replace(/[\u064b-\u065f\u0670\u0640]/g,'').replace(/[إأآٱ]/g,'ا').replace(/ى/g,'ي').trim();
+const itemSearchText = it=>normalizeItemSearch([it.sku,it.name,it.generic_name,it.manufacturer,it.information,it.category].join(' '));
+const filteredItems = query=>{
+ const terms=normalizeItemSearch(query).split(/\s+/).filter(Boolean);
+ return cache.items.filter(it=>terms.every(term=>itemSearchText(it).includes(term)));
+};
+const inventoryColumns=['Scientific name / SKU','Generic / other names','Manufacturer / made on','Category','Reference expiry','Warehouse stock','Batches','Status','Actions'];
+function itemRows(items){return items.map(it=>`<tr>
+ <td><strong>${E(it.name)}</strong><div class="tiny">${E(it.sku)}</div></td>
+ <td><strong>${E(it.generic_name||'—')}</strong>${it.information?`<div class="tiny item-alias" title="${E(it.information)}">${E(it.information)}</div>`:''}</td>
+ <td>${E(it.manufacturer||'—')}${it.manufacture_date?`<div class="tiny">${E(it.manufacture_date)}</div>`:''}</td>
+ <td>${E(it.category)}<div class="tiny">${E(it.unit)}</div></td>
+ <td>${E(it.expiry_date||'—')}</td>
+ <td><strong>${N(it.stock)}</strong> ${E(it.unit)}</td>
+ <td>${N(it.batch_count)}</td>
+ <td>${Number(it.min_stock)>0&&Number(it.stock)<Number(it.min_stock)?badge('Low stock','warning'):badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td>
+ <td>${can('item_write')?`<div class="db-small-actions"><button data-edit-item="${it.id}">Edit</button></div>`:'—'}</td>
+ </tr>`)}
 function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.code)}</strong></td><td>${E(it.name)}</td><td>${badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td>${can('department_write')?`<div class="db-small-actions"><button data-edit-dept="${it.id}">Edit</button></div>`:'—'}</td></tr>`)}
 function movementRows(movements){return movements.map(m=>`<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,m.kind==='OUT'?'blue':'neutral')}</td><td><strong>${E(m.paper_ref||'—')}</strong></td><td>${E(m.department_name||m.source||'—')}</td><td>${m.lines.map(l=>`${E(l.item_name)} · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`)}
 function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<new Date().toISOString().slice(0,10)?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
@@ -56,7 +75,7 @@ function overview(){
  ${kpis}<div class="db-layout"><div>${panel('Recent warehouse movements',table(['Movement','Type','Paper reference','From / To','Lines','By'],movementRows(cache.movements.slice(0,6))),'history')}</div><div>${panel('Attention needed',`<div class="db-help">${I('warning')} ${alerts.length} item(s) under the reorder threshold · ${exp.length} batch(es) expiring in the next 60 days.</div><div style="margin-top:15px">${alerts.slice(0,5).map(i=>`<div style="display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #eaf1f4;font-size:11px"><span>${E(i.name)}</span><strong>${N(i.stock)} / ${N(i.min_stock)}</strong></div>`).join('')||'<p class="muted-hint">No low-stock alerts at the moment.</p>'}</div>`,'warning')}
  ${panel('Quick navigation',`<div class="db-actions"><button class="db-btn secondary" data-go="inventory">Inventory</button><button class="db-btn secondary" data-go="departments">Departments</button><button class="db-btn secondary" data-go="movements">Movement history</button></div>`,'dashboard')}</div></div>`
 }
-function inventory(){return `${head('Item inventory','Create products independently of stock receipts. Stock is then added to its matching batch through Receive Shipments.',can('item_write')?`<button class="db-btn" data-new="item">${I('package')} New item</button>`:'')}${panel('Product catalog',`<div class="db-toolbar">${inp('filter','Search name, code or category...','search','id="itemFilter"')}<span class="muted-hint">${cache.items.length} registered items</span></div><div id="itemResults">${table(['Item / SKU','Category','Unit','In warehouse','Batches','Status','Actions'],itemRows(cache.items))}</div>`,'package')}`}
+function inventory(){return `${head('Item inventory','Create products independently of stock receipts. Stock is then added to its matching batch through Receive Shipments.',can('item_write')?`<button class="db-btn" data-new="item">${I('package')} New item</button>`:'')}${panel('Product catalog',`<div class="db-toolbar">${inp('filter','Search scientific, generic, common name, company or code...','search','id="itemFilter"')}<span class="muted-hint">${cache.items.length} registered items</span></div><div id="itemResults">${table(inventoryColumns,itemRows(cache.items))}</div>`,'package')}`}
 function departments(){return `${head('Hospital departments','These are shipment destinations. This version does not manage their internal stock.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',table(['Code','Department','Status','Actions'],departmentRows(cache.departments)),'building')}`}
 function batches(){return `${head('Batches and expiration','Stock quantity is recorded separately for every batch. Never issue expired lots.')}${panel('Batch register',table(['Product','Batch number','Expiration','Warehouse balance','Status'],batchRows(cache.batches)),'calendar')}`}
 function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Incoming</option><option value="OUT">Distributions</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper reference','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
@@ -87,14 +106,25 @@ function showPage(next){
 function route(next){location.hash=next;showPage(next)}
 function closeMenu(){$('#sidebar').classList.remove('open');$('#dimOverlay').classList.remove('show')}
 function modalOpen(title,description,fields,formType,button='Save changes'){
- const modal=$('#entityModal');modal.innerHTML=`<div class="modal-body" role="dialog" aria-modal="true" aria-label="${E(title)}"><div class="db-actions" style="justify-content:space-between;align-items:center"><h2>${E(title)}</h2><button class="db-btn secondary small" type="button" data-close-modal>Close ×</button></div><p>${E(description)}</p><form id="entityForm" data-entity="${formType}" class="db-form"><div class="db-grid">${fields}</div><div class="modal-footer"><button class="db-btn secondary" type="button" data-close-modal>Cancel</button><button class="db-btn" type="submit">${E(button)}</button></div></form></div>`;
+ const modal=$('#entityModal');modal.innerHTML=`<div class="modal-body ${formType.startsWith('item:')?'item-dialog':''}" role="dialog" aria-modal="true" aria-label="${E(title)}"><div class="db-actions" style="justify-content:space-between;align-items:center"><h2>${E(title)}</h2><button class="db-btn secondary small" type="button" data-close-modal>Close ×</button></div><p>${E(description)}</p><form id="entityForm" data-entity="${formType}" class="db-form"><div class="db-grid">${fields}</div><div class="modal-footer"><button class="db-btn secondary" type="button" data-close-modal>Cancel</button><button class="db-btn" type="submit">${E(button)}</button></div></form></div>`;
  modal.classList.add('open');modal.setAttribute('aria-hidden','false');window.HWLang?.apply();$('.db-input',modal)?.focus();
 }
 function modalClose(){const el=$('#entityModal');el.classList.remove('open');el.innerHTML='';el.setAttribute('aria-hidden','true')}
 function editItem(it=null){
- const f=[field('Product code / SKU',`<input name="sku" class="db-input" required maxlength="50" value="${E(it?.sku||'')}" placeholder="MED-0001">`),field('Name',`<input name="name" class="db-input" required value="${E(it?.name||'')}" placeholder="e.g. Ceftriaxone 1 g">`),field('Category',`<input name="category" class="db-input" required value="${E(it?.category||'')}" placeholder="Medications / Supplies">`),field('Stock unit',`<input name="unit" class="db-input" required value="${E(it?.unit||'')}" placeholder="Vial, box, piece, bag">`),field('Low-stock threshold',`<input name="min_stock" class="db-input" type="number" min="0" step="1" required value="${E(it?.min_stock??0)}">`)];
+ const f=[
+  field('Product code / SKU',`<input name="sku" class="db-input" required maxlength="50" value="${E(it?.sku||'')}" placeholder="MED-0001">`),
+  field('Scientific item name',`<input name="name" class="db-input" required maxlength="160" value="${E(it?.name||'')}" placeholder="e.g. Ceftriaxone 1 g">`),
+  field('Generic name',`<input name="generic_name" class="db-input" maxlength="160" value="${E(it?.generic_name||'')}" placeholder="Generic / alternative official name">`),
+  field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
+  field('Category',`<input name="category" class="db-input" required maxlength="80" value="${E(it?.category||'')}" placeholder="Medications / Supplies">`),
+  field('Stock unit',`<input name="unit" class="db-input" required maxlength="30" value="${E(it?.unit||'')}" placeholder="Vial, box, piece, bag">`),
+  field('Manufacture date (optional)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`),
+  field('Expiration date (optional)',`<input name="expiry_date" class="db-input" type="date" value="${E(it?.expiry_date||'')}">`),
+  field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Slang, common names, local terms, abbreviations, spellings... separate with commas or new lines">${E(it?.information||'')}</textarea>`,
+   'Add as many alternative names or notes as you need. All text here is included in item search.').replace('class="db-field"','class="db-field wide"')
+ ];
  if(it)f.push(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`));
- modalOpen(it?'Edit item':'Register item','New items start with zero stock. Receive a shipment to record a batch and quantity.',f.join(''),`item:${it?.id||'new'}`);
+ modalOpen(it?'Edit item':'Register item','Dates here describe the catalog item only. Enter the actual expiry for each batch when receiving stock.',f.join(''),`item:${it?.id||'new'}`);
 }
 function editDept(it=null){modalOpen(it?'Edit department':'Add department','Departments are distribution destinations, not separate inventory locations.',
  field('Department code',`<input name="code" class="db-input" required maxlength="30" value="${E(it?.code||'')}" placeholder="ER">`)+field('Department name',`<input name="name" class="db-input" required value="${E(it?.name||'')}" placeholder="Emergency Department">`)+(it?field('Status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`):''),
@@ -115,7 +145,7 @@ function extractLines(container,type){return $$(`[data-${type}-line]`,container)
   let line={};$$('[data-key]',el).forEach(n=>line[n.dataset.key]=n.value.trim());return line;
 })}
 async function submitEntity(form){const type=form.dataset.entity, [entity,id]=type.split(':');const d=Object.fromEntries(new FormData(form).entries());
- if(entity==='item'){d.min_stock=Number(d.min_stock);if(id!=='new')d.active=d.active==='1';await api(id==='new'?'/api/items':'/api/items/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
+ if(entity==='item'){if(id!=='new')d.active=d.active==='1';await api(id==='new'?'/api/items':'/api/items/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='department'){if(id!=='new')d.active=d.active==='1';await api(id==='new'?'/api/departments':'/api/departments/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='user'){if(id!=='new')d.is_active=d.is_active==='1';await api(id==='new'?'/api/users':'/api/users/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='reset'){await api('/api/users/'+id+'/reset-password',{method:'POST',data:d})}
@@ -165,7 +195,7 @@ document.addEventListener('submit',async e=>{
  }catch(err){toast(err.message,'error')}
  finally{if(document.body.contains(button))button.disabled=false}
 });
-document.addEventListener('input',e=>{if(e.target.id==='itemFilter'){const q=e.target.value.toLowerCase();const items=cache.items.filter(x=>(x.sku+' '+x.name+' '+x.category).toLowerCase().includes(q));$('#itemResults').innerHTML=table(['Item / SKU','Category','Unit','In warehouse','Batches','Status','Actions'],itemRows(items))}
+document.addEventListener('input',e=>{if(e.target.id==='itemFilter'){const items=filteredItems(e.target.value);$('#itemResults').innerHTML=table(inventoryColumns,itemRows(items))}
  if(e.target.id==='movementFilter')filterMovements()});
 document.addEventListener('change',e=>{if(e.target.id==='movementType')filterMovements()});
 function filterMovements(){const q=($('#movementFilter')?.value||'').toLowerCase(),t=$('#movementType')?.value||'';

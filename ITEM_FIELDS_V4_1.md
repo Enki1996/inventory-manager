@@ -1,0 +1,25 @@
+# Add / Edit Item — V4.1
+
+## Fields
+
+| English interface | Arabic interface | Database column |
+|---|---|---|
+| Product code / SKU | رمز الصنف | `items.sku` |
+| Scientific item name (previous item name) | الاسم العلمي للصنف | `items.name` |
+| Generic name | الاسم الجنيس / العام | `items.generic_name` |
+| Manufacturer company | الشركة المصنّعة | `items.manufacturer` |
+| Category | الفئة | `items.category` |
+| Stock unit | وحدة المخزون | `items.unit` |
+| Manufacture date (optional) | تاريخ التصنيع (اختياري) | `items.manufacture_date` |
+| Expiration date (optional) | تاريخ انتهاء الصلاحية (اختياري) | `items.expiry_date` |
+| Information / alternate names | معلومات وأسماء أخرى متداولة | `items.information` |
+
+`name` remains the existing database field: previous item names and links to receipt/issue history are not changed. New optional text fields default to empty; optional dates default to null. Manufacture date cannot be later than expiration date if both are provided. The information field supports up to 2000 characters and accepts any mix of comma/newline-separated alternative names, local slang, search keywords and notes. Inventory search checks the SKU, scientific name, generic name, manufacturer, category, and the full information text (with Arabic diacritic/hamza normalization), and global search routes to the inventory search.
+
+**Low-stock threshold:** Removed from Add/Edit Item UI as requested. Newly created items use the existing database default of zero. Historic thresholds are retained, so older low-stock reports and alerts still behave as before.
+
+**Important batch rule:** The catalog expiration and manufacturing dates are *reference metadata* only. Every incoming shipment line still registers the batch number and batch-specific expiration date independently. Distribution blocks expired lots based on `batches.expiry_date`, never on `items.expiry_date`. Editing reference dates does not edit batches, warehouse balance, or movement history.
+
+**Updates:** V4 uses schema version 1; V4.1 uses schema version 2. At startup, `migrate_item_details` adds the five columns as needed. Schema V1 database backups can be uploaded to the V4.1 Restore screen and are migrated during restoration. Fresh V4.1 backups include the new fields.
+
+**Deployment:** Extract the ZIP to a private GitHub repository's root and let Railway deploy; keep existing Railway persistent `/data` volume. Never commit a real SQLite database, passwords, or sensitive exported backup files.

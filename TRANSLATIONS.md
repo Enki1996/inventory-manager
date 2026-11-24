@@ -1,4 +1,4 @@
-# Editing Arabic and English terminology — V4.0
+# Editing Arabic and English terminology — V4.1
 
 The site is **Arabic-first**; staff may switch to English from every page. The selection persists in their individual browser.
 
@@ -29,3 +29,9 @@ English source labels appear in the HTML/JS page files under `static/`. If chang
 ## Deployment rules
 
 Keep your existing Railway /data volume; update the **code**, not the database file. Configure a strong bootstrap admin password in Railway secrets as described in `RAILWAY_SETUP.md`. The old local testing password `123` must never be used on a public Railway deployment.
+
+## V4.1 item terminology
+
+Additional editable keys in `static/locales/ar.json` include `Scientific item name`, `Generic name`, `Manufacturer company`, `Manufacture date (optional)`, `Expiration date (optional)`, and `Information / alternate names`.
+
+The information field accepts multiple aliases, slang terms and free-form notes in Arabic or English. Item searches check this text without translating or overwriting the saved values.

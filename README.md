@@ -1,6 +1,16 @@
-# Hospital Warehouse IMS V4.0 — Arabic-first bilingual test app
+# Hospital Warehouse IMS V4.1 — expanded item details
 
-**New in V4:** Arabic is the default interface language on Home, Login and every Dashboard screen. An العربية / EN switch appears across these pages, stores the browser preference, and changes layout direction (RTL ↔ LTR). The warehouse terminology is editable at `static/locales/ar.json`. No inventory database migration is required.
+**New in V4.1 (Arabic first / English available):** The Inventory → Add/Edit Item form now includes scientific name (existing item name), generic name, manufacturer company, manufacture date, expiration date, and a searchable free-text **Information / alternate names** field. The former low-stock threshold input is removed from both item forms. The warehouse database, user roles, shipment and batch workflows remain in place.
+
+**Item dates are catalog reference information, not received-stock batch dates.** The receiving screen continues to ask for the actual expiry of each incoming batch, and stock expiry alerts and distribution validation use those batch dates, not the catalog reference date. Not all supplies expire; reference dates are optional. Details in `ITEM_FIELDS_V4_1.md`.
+
+**Existing live database preservation:** V4.1 automatically adds five optional columns to the V4 database on first launch, without erasing items, movements, batches, accounts, or existing low-stock settings. Keep your existing Railway `/data` volume and update code only. The new backup format is schema V2; the restore endpoint also upgrades a compatible V4/V3 backup with schema V1. Before updating a live instance, manually download a backup and retain an off-server copy.
+
+---
+
+# Previous release: V4.0 Arabic-first bilingual app
+
+**New in V4:** Arabic is the default interface language on Home, Login and every Dashboard screen. An العربية / EN switch appears across these pages, stores the browser preference, and changes layout direction (RTL ↔ LTR). The warehouse terminology is editable at `static/locales/ar.json`. V4.1 performs an additive database schema migration.
 
 Read `TRANSLATIONS.md` for Arabic wording changes. See `RAILWAY_SETUP.md` for live deployment.
 
