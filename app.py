@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
 import io
@@ -48,9 +49,9 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.11.0'
+APP_RELEASE = '4.12.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -150,6 +151,44 @@ def migrate_item_details(c: sqlite3.Connection):
             c.execute(f'ALTER TABLE items ADD COLUMN {name} {definition}')
     c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
               "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def migrate_annual_need(c: sqlite3.Connection):
+    """V8: catalog-level annual requirements, NULL means never entered.
+
+    Neither old stock lots nor their historical movement records are modified.
+    """
+    columns = {row[1] for row in c.execute('PRAGMA table_info(items)')}
+    if 'annual_need' not in columns:
+        c.execute('ALTER TABLE items ADD COLUMN annual_need INTEGER CHECK(annual_need >= 0)')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def annual_need_from_fields(data, *, prior=None):
+    """No fabricated annual need: omitted edits preserve their previous value."""
+    if 'annual_need' not in data:
+        return prior
+    raw = data.get('annual_need')
+    if raw in (None, ''):
+        return None
+    return integer(data, 'annual_need', 0, 1_000_000_000)
+
+
+def percent_parameter(raw, field):
+    """Positive, adjustable percentage with at most two decimal places."""
+    if raw in (None, ''):
+        return None
+    s = str(raw).strip()
+    if not re.fullmatch(r'\d{1,4}(?:\.\d{1,2})?', s):
+        err(422, f'{field} must be a positive percentage with at most two decimal places')
+    try:
+        value = Decimal(s)
+    except InvalidOperation:
+        err(422, f'{field} is invalid')
+    if not Decimal('0') < value <= Decimal('1000'):
+        err(422, f'{field} must be above zero and at most 1000%')
+    return value
 
 
 def require_branch(value, *, allow_unassigned=False):
@@ -417,6 +456,7 @@ def init_db():
                 expiry_date TEXT,
                 information TEXT NOT NULL DEFAULT '',
                 price_fils INTEGER CHECK(price_fils >= 0),
+                annual_need INTEGER CHECK(annual_need >= 0),
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
@@ -472,6 +512,7 @@ def init_db():
         migrate_outgoing_and_price(c)
         migrate_shipment_routes(c)
         migrate_per_receipt_pricing_and_transfer_authorization(c)
+        migrate_annual_need(c)
         seed_default_departments(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
@@ -749,18 +790,19 @@ async def create_item(request: Request):
     sku = validated_text(d, 'sku', required=False, max_len=50).upper() or make_sku(branch)
     generic, manufacturer, mfg, exp, info = item_details(d)
     unit_price = price_from_fields(d)
+    annual_need = annual_need_from_fields(d)
     try:
         with db() as c:
             q = c.execute('''INSERT INTO items(sku,name,category,branch,unit,generic_name,trade_name,initial_batch_no,
-                            manufacturer,manufacture_date,expiry_date,information,price_fils,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                          (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,now()))
+                            manufacturer,manufacture_date,expiry_date,information,price_fils,annual_need,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,annual_need,now()))
             # Register a batch with zero stock; it becomes available only after an IN movement.
             c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils) VALUES(?,?,?,?,?)',
                       (q.lastrowid,batch_no,exp,now(),unit_price))
             audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':cat,'unit':unit,'initial_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price})
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price,'annual_need':annual_need})
             return {'ok': True, 'id': q.lastrowid, 'sku':sku}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
@@ -783,6 +825,7 @@ async def update_item(item_id: int, request: Request):
             name, trade = item_name_fields(d, branch)
             generic, manufacturer, mfg, exp, info = item_details(d)
             unit_price = price_from_fields(d)
+            annual_need = annual_need_from_fields(d, prior=old['annual_need'])
             # Hidden legacy generic-name field must survive an edit in the new form.
             if 'generic_name' not in d:
                 generic = old['generic_name']
@@ -802,12 +845,12 @@ async def update_item(item_id: int, request: Request):
                 c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils) VALUES(?,?,?,?,?)',
                           (item_id,batch_no,exp,now(),unit_price))
             c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,trade_name=?,initial_batch_no=?,
-                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,price_fils=?,active=? WHERE id=?''',
-                      (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,
+                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,price_fils=?,annual_need=?,active=? WHERE id=?''',
+                      (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,annual_need,
                        1 if d.get('active',True) else 0,item_id))
             audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':category,'unit':unit,'reference_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price})
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price,'annual_need':annual_need})
         return {'ok': True}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
@@ -1112,9 +1155,9 @@ def dashboard_data(request: Request):
         return {'items':total_items,'stock':total_units,'departments':dept,'movements':movements_count,'low_stock':low,'expiry_soon':soon}
 
 
-# V4.11 — Warehouse status statements (المواقف): read-only summaries.
-# Note that our approved expiry window is calendar-month based: through the last
-# day of the current month *next year*, not a rolling 365-day period.
+# V4.12 — Warehouse positions: adjustable cutoff and annual-requirement ratios.
+# Default expiry window remains calendar-month based: through the last day
+# of the current month *next year*, not a rolling 365-day period.
 def position_window():
     today = dt.datetime.now(ZoneInfo('Asia/Baghdad')).date()
     year, month = today.year + 1, today.month
@@ -1125,14 +1168,29 @@ def position_window():
 
 
 @app.get('/api/positions')
-def warehouse_positions(request: Request):
-    get_user(request)  # Reports are visible to authenticated staff, like inventory.
-    today, end_exclusive, last_included = position_window()
+def warehouse_positions(request: Request, expiry_before: str | None = None,
+                        scarce_pct: str | None = None, surplus_pct: str | None = None):
+    get_user(request)  # Same authenticated viewing rights as the inventory.
+    today, default_end, _ = position_window()
+    if expiry_before not in (None, ''):
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', expiry_before):
+            err(422, 'Expiry cutoff must be a date formatted YYYY-MM-DD')
+        try:
+            end_date = dt.date.fromisoformat(expiry_before)
+        except ValueError:
+            err(422, 'Expiry cutoff is not a valid date')
+        if not 1900 <= end_date.year <= 2200:
+            err(422, 'Expiry cutoff year is out of range')
+        end_exclusive = end_date.isoformat()
+    else:
+        end_exclusive = default_end
+    last_included = (dt.date.fromisoformat(end_exclusive) - dt.timedelta(days=1)).isoformat()
+    scarce_limit = percent_parameter(scarce_pct, 'scarce_pct')
+    surplus_limit = percent_parameter(surplus_pct, 'surplus_pct')
     with db(readonly=True) as c:
-        # Zero-stock includes catalog entries with no batches at all.
         missing = [dict(r) for r in c.execute('''
             SELECT i.id AS item_id, i.sku, i.name, i.trade_name, i.generic_name, i.information, i.branch,
-                   i.category, i.unit, COALESCE(SUM(b.on_hand), 0) AS stock,
+                   i.category, i.unit, i.annual_need, COALESCE(SUM(b.on_hand), 0) AS stock,
                    COUNT(b.id) AS lot_count
             FROM items i LEFT JOIN batches b ON b.item_id = i.id
             WHERE i.active = 1
@@ -1140,8 +1198,6 @@ def warehouse_positions(request: Request):
             HAVING COALESCE(SUM(b.on_hand), 0) <= 0
             ORDER BY i.branch, i.name COLLATE NOCASE, i.id
         ''')]
-        # A dated lot counts only if it has physical stock and has not yet expired.
-        # Keep separate rows for different lots, prices and batch references.
         expiring = [dict(r) for r in c.execute('''
             SELECT b.id AS lot_id, i.id AS item_id, i.sku, i.name,
                    i.trade_name, i.generic_name, i.information, i.branch, i.category, i.unit,
@@ -1157,12 +1213,41 @@ def warehouse_positions(request: Request):
             WHERE i.active=1 AND b.on_hand>0 AND b.expiry_date IS NOT NULL
               AND b.expiry_date < ?
         ''', (today,)).fetchone()['lots']
+        # Report ratio compares usable, dated, unexpired stock against annual need.
+        # Do not count expired or unknown-expiry lots as safe stock for this calculation.
+        balance_rows = [dict(r) for r in c.execute('''
+            SELECT i.id AS item_id, i.sku, i.name, i.trade_name, i.generic_name,
+                   i.information, i.branch, i.category, i.unit, i.annual_need,
+                   COALESCE(SUM(CASE WHEN b.expiry_date >= ? THEN b.on_hand ELSE 0 END), 0) AS stock,
+                   COALESCE(SUM(b.on_hand), 0) AS physical_stock
+            FROM items i LEFT JOIN batches b ON b.item_id = i.id
+            WHERE i.active=1
+            GROUP BY i.id ORDER BY i.branch, i.name COLLATE NOCASE, i.id
+        ''', (today,))]
+    scarce, surplus, without_annual = [], [], 0
+    for record in balance_rows:
+        need = record['annual_need']
+        if not need or need <= 0:
+            without_annual += 1
+            continue
+        percent = Decimal(record['stock']) * 100 / Decimal(need)
+        record['percent_of_need'] = round(float(percent), 2)
+        if scarce_limit is not None and percent < scarce_limit:
+            scarce.append(record.copy())
+        if surplus_limit is not None and percent > surplus_limit:
+            surplus.append(record.copy())
+    scarce.sort(key=lambda x: (x['percent_of_need'], x['name'].casefold()))
+    surplus.sort(key=lambda x: (-x['percent_of_need'], x['name'].casefold()))
     return {
         'as_of': today, 'expiry_before': end_exclusive,
+        'expiry_default_before': default_end,
         'expiry_last_included': last_included,
         'missing': missing, 'near_expiry': expiring,
+        'scarce': scarce, 'surplus': surplus,
+        'scarce_pct': str(scarce_limit) if scarce_limit is not None else None,
+        'surplus_pct': str(surplus_limit) if surplus_limit is not None else None,
+        'annual_need_unset_count': without_annual,
         'expired_lot_count': expired_stock,
-        'pending_calculations': ['scarce', 'surplus']
     }
 
 
@@ -1382,6 +1467,11 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 movement_cols = {r[1] for r in verify.execute('PRAGMA table_info(movements)')}
                 if 'unit_price_fils' not in batch_cols or not {'trusted_pharmacist_name','authorization_ref'}.issubset(movement_cols):
                     err(422, 'Backup declares V7 but is missing priced lots or transfer authorization')
+            if version < 8:
+                migrate_annual_need(verify)
+            else:
+                if 'annual_need' not in {r[1] for r in verify.execute('PRAGMA table_info(items)')}:
+                    err(422, 'Backup declares V8 but is missing annual requirement field')
             seed_default_departments(verify)  # Older backups gain starter departments without deleting user records.
             verify.commit()
         except sqlite3.DatabaseError:
