@@ -183,7 +183,7 @@
   "Stock quantity is recorded separately for every batch. Never issue expired lots.": "تُسجل الكمية لكل تشغيلة على حدة، ويُمنع صرف المواد منتهية الصلاحية.",
   "Batch register": "سجل التشغيلات",
   "Expiration": "انتهاء الصلاحية",
-  "Warehouse balance": "الرصيد في المخزن",
+  "Warehouse balance": "الرصيد المتبقي",
   "Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.": "لكل استلام أو صرف أو مرتجع أو تعديل رقم حركة دائم بالإضافة إلى رقم المستند الورقي الأصلي.",
   "Transaction register": "سجل العمليات",
   "Search requisition, item or user...": "ابحث برقم الطلب أو الصنف أو المستخدم...",
@@ -205,7 +205,7 @@
   "Received from / supplier": "الجهة المورِّدة",
   "Notes (optional)": "ملاحظات (اختياري)",
   "Delivery or document notes": "ملاحظات حول التسليم أو المستند",
-  "Received product batches": "الوجبات الواردة",
+  "Received product batches": "المواد والوجبات المستلمة",
   "+ Add another item": "+ إضافة صنف آخر",
   "Save receipt and update stock": "حفظ الاستلام وتحديث المخزون",
   "Distribute to department": "تجهيز قسم",
@@ -556,5 +556,12 @@
   "Legacy movement": "حركة قديمة",
   "External transfer received": "مناقلة خارجية واردة",
   "Order / transfer number": "رقم الطلبية / المناقلة",
-  "Transfer / emergency details": "ملاحظات المناقلة أو الصرف الطارئ"
+  "Transfer / emergency details": "ملاحظات المناقلة أو الصرف الطارئ",
+  "Trusted pharmacist name": "اسم الصيدلي المخوّل",
+  "Full name of authorized pharmacist": "اسم الصيدلي المخوّل (حتى لو لم يكن من ملاك المستشفى)",
+  "Authorization letter number — رقم كتاب التخويل": "رقم كتاب التخويل",
+  "Authorization letter / decree number": "أدخل رقم كتاب التخويل",
+  "Authorization letter no.:": "رقم كتاب التخويل:",
+  "Expiry date": "تاريخ الصلاحية",
+  "Existing batches may have separate unit prices.": "قد تتوفر وجبات متعددة للصنف نفسه بأسعار مختلفة."
 }

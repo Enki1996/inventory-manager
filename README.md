@@ -1,30 +1,40 @@
-# Hospital Warehouse IMS V4.7 — Seven Shipment Routes
+# Hospital Warehouse IMS V4.8 — Shipment prices, authorization & departments
 
-One central hospital warehouse, three fixed warehouse branches, twenty approved registers, full item pricing in Iraqi dinar and fils, batch-level stock and expiration tracking, scoped employee permissions, audit history, and portable database backup/restore.
+This is the complete source for the **existing** one-warehouse Railway test application (Home, Login, Dashboard, FastAPI backend, SQLite, and Arabic-first bilingual UI). It is an **incremental replacement for V4.7**, not a new database or a second service.
 
-**New V4.7 workflow:** Three outgoing shipment routes and four incoming shipment routes. Emergency department issues may be recorded before paper references are available; both document numbers can be added afterward with an audit entry and without repeating the stock movement. External transfer forms use a trusted pharmacist selected from active employee accounts.
+## New in V4.8
 
-See **[V4_7_SHIPMENT_ROUTES.md](V4_7_SHIPMENT_ROUTES.md)** for exact route fields, deployment, migration and testing. Previous version notes remain in `V4_6_CHANGES.md` and `V4_5_DEPLOY_AND_VERIFY.md`.
+- **Incoming external transfers and outgoing external/pharmacy transfers:** Enter the **trusted pharmacist's name** as free text, including people who don't have staff accounts; additionally enter **رقم كتاب التخويل** (authorization letter number). Both are required for these transfers, recorded in movement history, and included in backups. Department issues and ordinary receipts do not require them.
+- **Received item lines:** Enter **دينار** and **فلس** for each incoming line, independently of the catalog reference price. A new receipt can have a different price than earlier receipts of the same product.
+- **Independent inventory lots:** One item may have many stored rows with different batch numbers, expiry dates, and unit prices. Stock is tracked by lot. Issuing a batch captures its stored lot price in movement history. Other lot prices don't change when the catalog price changes.
+- **Departments:** Adding or editing requires only **the department name**. A code is generated automatically for new departments as an internal database key; previous department codes remain intact but no longer appear in the form.
+- **Arabic and English:** Arabic remains the default. The light visual theme and the three outgoing / four incoming routes remain.
 
-## Release verification
+See [V4_8_CHANGES.md](V4_8_CHANGES.md) for database details and test instructions.
 
-`/api/health` returns `{"ok":true,"database":"sqlite","version":6,"release":"4.7.0"}`.
+## Deployment to the existing Railway app
+
+1. Export a backup of the current database through **Backup & Restore** (the download contains sensitive data and password hashes; keep it private).
+2. Confirm your existing Railway service has a persistent volume mounted at `/data`, and `WAREHOUSE_DATA_DIR=/data`.
+3. Extract this ZIP and replace the **source code** in your existing private GitHub repository. Do **not** upload or replace SQLite files, backups, your Railway volume, or secret variables.
+4. Redeploy the **same Railway service**, with one replica and worker.
+5. Open `https://your-app-domain/api/health` and confirm `"version":7,"release":"4.8.0"`.
+6. Check that previously saved items, batches, incoming/outgoing movements, and departments remain unchanged. Test a dummy receipt at different price/expiry, an external transfer with outside pharmacist, and adding a department by name.
+
+The database migrates automatically when the new version starts. Older V4.7 data remains in the persistent SQLite database, and the new columns/index are added without erasing historic movements.
+
+**Important historical data limitation:** Earlier receipt rows already recorded a movement price snapshot, which remains unchanged. Existing legacy batch balances are initialized with the item's last saved catalog price *where known*, because the old schema did not track balances separately by receipt price. That inferred price cannot recover any forgotten original purchase prices. New receipts are accurately differentiated after V4.8.
 
 ## Local testing
 
-```sh
+```bash
 pip install -r requirements.txt
+python test_v48_regression.py
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-For **local-only testing**, the initial account is `enki` with password `123`. This password is **blocked for public deployment**. Configure the strong private `WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD` in Railway. Do not place credentials in GitHub or chat.
+Local test-only initial credentials are `enki` / `123`. **Do not deploy these credentials on the public internet.** The Railway app requires a secure admin bootstrap password stored privately in Railway variables; do not place credentials into GitHub.
 
-Run current automated tests from this folder with `python test_v47_routes.py`. Historic tests from older versions are archived under `tests_legacy/` because their previous two-route API contract no longer applies.
+Arabic interface strings: `static/locales/ar.json`.
 
-## Deployment
-
-Keep the same private GitHub repository, Railway service, and persistent `/data` volume. Export a backup before deploying. Copy V4.7 code onto the same repository and redeploy; the database schema migration is additive and preserves existing inventory and movement history. Never upload the live SQLite file to GitHub.
-
-The interface defaults to Arabic with an English toggle. Edit Arabic translations in `static/locales/ar.json`; product and account names retain exactly the values employees enter.
-
-This is a collaborative testing tool, **not** yet a fully validated clinical inventory system. Use fictitious inventory, not confidential hospital data, until security, operational controls, and backup recovery are reviewed.
+This is an early collaborative warehouse **testing** build. Do not enter confidential hospital or patient data or depend on it for real clinical operations until security and operational validation are completed. The downloadable ZIP database backup is not encrypted.

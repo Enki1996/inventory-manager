@@ -1,3 +1,9 @@
+# V4.8 update — use your EXISTING Railway service
+
+**Same private GitHub repo, same Railway app, same `/data` volume.** Export a backup before updating. The schema migration is additive; after deployment `/api/health` should show `"release":"4.8.0"`, `"version":7`. New records use free-text pharmacists and authorization letters, individually priced inventory lots, and name-only departments. Details: `V4_8_CHANGES.md`.
+
+---
+
 # Deploy V4.7 to the EXISTING Railway service
 
 **Same private GitHub repository, same Railway service, same persistent `/data` volume.** Export a backup before updating code. `/api/health` must show `release: 4.7.0` and `version: 6` after redeploy. The additive migration adds shipment route, trusted pharmacist, and emergency paperwork fields without deleting old stock or history. See `V4_7_SHIPMENT_ROUTES.md` for all three outgoing and four incoming routes.

@@ -76,3 +76,10 @@
 .emergency-check strong{font-size:11px}.emergency-check small{font-size:10px;line-height:1.6}
 @media(max-width:1000px){.dest-choice.three-routes{grid-template-columns:1fr}}
 @media(max-width:700px){.dest-choice.four-routes{grid-template-columns:1fr}.dest-choice-option{min-height:60px}}
+
+/* V4.8: incoming goods lines contain independent price in dinar + fils.
+   Seven controls fit large screens; compact screens wrap safely. */
+.ship-line.receive-priced{grid-template-columns:minmax(180px,1.7fr) minmax(120px,1fr) minmax(135px,1fr) minmax(85px,.55fr) minmax(95px,.65fr) minmax(85px,.6fr) 32px;align-items:end}
+.ship-line.receive-priced .db-input,.ship-line.receive-priced .db-select{width:100%;min-width:0}
+@media(max-width:1200px){.ship-line.receive-priced{grid-template-columns:repeat(3,minmax(0,1fr))}.ship-line.receive-priced .db-field:first-child{grid-column:auto}}
+@media(max-width:700px){.ship-line.receive-priced{grid-template-columns:repeat(2,minmax(0,1fr))}.ship-line.receive-priced .db-field:first-child{grid-column:1/-1}}
