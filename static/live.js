@@ -1,4 +1,4 @@
-/* Live V4.11 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.12 bilingual warehouse application: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -12,6 +12,25 @@ const badge = (label,kind='neutral')=>`<span class="pill ${kind}">${E(label)}</s
 const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E(title)}</strong><span class="muted-hint">${E(sub)}</span></div>`;
 let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,positions:null,books:{},units:{},staff:[]}, toastTimer;
 let inlineNewItem=null; // Pending shipment line; kept intact while the item modal is open.
+let statementExpiryBefore='', statementScarcePct='', statementSurplusPct='';
+const statementApiPath=()=>{
+ const p=new URLSearchParams();
+ if(statementExpiryBefore)p.set('expiry_before',statementExpiryBefore);
+ if(statementScarcePct)p.set('scarce_pct',statementScarcePct);
+ if(statementSurplusPct)p.set('surplus_pct',statementSurplusPct);
+ const q=p.toString();return '/api/positions'+(q?'?'+q:'');
+};
+async function reloadPositions(){
+ const search=$('#statementSearch')?.value||'',branch=$('#statementBranch')?.value||'';
+ cache.positions=await api(statementApiPath());
+ if(view==='positions'){
+  $('#dashboardView').innerHTML=warehouseStatements();
+  if($('#statementSearch'))$('#statementSearch').value=search;
+  if($('#statementBranch'))$('#statementBranch').value=branch;
+  filterStatement();window.HWLang?.apply();
+ }
+}
+
 const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
@@ -69,7 +88,7 @@ function toast(text,kind='ok'){
 }
 async function refreshData(){
   const endpoints=['items','departments','batches','movements','dashboard','positions','books','units','staff-directory'];
-  const rows=await Promise.all(endpoints.map(path=>api('/api/'+path)));
+  const rows=await Promise.all(endpoints.map(path=>api(path==='positions'?statementApiPath():'/api/'+path)));
   for(let i=0;i<endpoints.length;i++)cache[endpoints[i]==='staff-directory'?'staff':endpoints[i]]=rows[i];
   if(can('users'))cache.users=await api('/api/users');
 }
@@ -131,7 +150,7 @@ function filterInventory(){
  const matched=filteredItems(q).filter(it=>(!branch||it.branch===branch)&&(!book||it.category===book));
  const results=$('#itemResults');if(results)results.innerHTML=table(inventoryColumns,itemRows(matched));
 }
-const inventoryColumns=['Item / scientific name / SKU','Generic / other names','Manufacturer / made on','Unit price (IQD)','Warehouse branch','Book / register category','Reference expiry','Warehouse stock','Batches','Status','Actions'];
+const inventoryColumns=['Item / scientific name / SKU','Generic / other names','Manufacturer / made on','Unit price (IQD)','Warehouse branch','Book / register category','Reference expiry','Warehouse stock','Annual requirement','Batches','Status','Actions'];
 function itemRows(items){return items.map(it=>`<tr>
  <td><strong>${E(it.trade_name||it.name)}</strong>${it.trade_name?`<div class="tiny">${E(it.name)}</div>`:""}<div class="tiny">${E(it.sku)}</div></td>
  <td><strong>${E(it.generic_name||'—')}</strong>${it.information?`<div class="tiny item-alias" title="${E(it.information)}">${E(it.information)}</div>`:''}</td>
@@ -141,6 +160,7 @@ function itemRows(items){return items.map(it=>`<tr>
  <td>${E(it.category)}<div class="tiny">${E(it.unit)}</div></td>
  <td>${E(it.expiry_date||'—')}</td>
  <td><strong>${N(it.stock)}</strong> ${E(it.unit)}</td>
+ <td>${it.annual_need==null?'—':`<strong>${N(it.annual_need)}</strong> ${E(it.unit)}`}</td>
  <td>${N(it.batch_count)}</td>
  <td>${Number(it.min_stock)>0&&Number(it.stock)<Number(it.min_stock)?badge('Low stock','warning'):badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td>
  <td>${canEditBranch(it.branch)?`<div class="db-small-actions"><button data-edit-item="${it.id}">Edit</button></div>`:'—'}</td>
@@ -395,47 +415,62 @@ function reports(){const low=cache.items.filter(x=>x.active&&x.min_stock>0&&x.st
 return `${head('Warehouse reports','Basic live summaries derived from your saved records. Spreadsheet and PDF reports can be added after we finalize the workflow.')}
 <div class="db-kpis"><div class="db-kpi"><span class="name">${I('package')} Products</span><span class="num">${N(cache.items.length)}</span></div><div class="db-kpi"><span class="name">${I('warning')} Low stock</span><span class="num">${N(low.length)}</span></div><div class="db-kpi"><span class="name">${I('outgoing')} Distribution slips</span><span class="num">${N(total)}</span></div><div class="db-kpi"><span class="name">${I('history')} Total transactions</span><span class="num">${N(cache.movements.length)}</span></div></div>
 ${panel('Low-stock products',table(['SKU','Item','Current units','Minimum threshold'],low.map(x=>`<tr><td>${E(x.sku)}</td><td>${E(x.name)}</td><td>${N(x.stock)} ${E(x.unit)}</td><td>${N(x.min_stock)}</td></tr>`)),'warning')}`}
-// V4.11 — read-only warehouse status statements (المواقف).
+// V4.12 — read-only warehouse statements with editable thresholds and expiry cutoff.
 let statementMode='missing';
 function warehouseStatements(){
- const info=cache.positions || {missing:[],near_expiry:[],expired_lot_count:0,as_of:'',expiry_last_included:''};
- const isMissing=statementMode==='missing';
+ const info=cache.positions || {missing:[],near_expiry:[],scarce:[],surplus:[],expired_lot_count:0,as_of:'',expiry_last_included:''};
  const ar=window.HWLang?.get()!=='en';
+ const isMissing=statementMode==='missing',isExpiry=statementMode==='near_expiry',isPercent=!isMissing&&!isExpiry;
+ const threshold=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
  const options=[
-  {key:'scarce',name:'Scarce materials',icon:'warning',disabled:true,desc:'Calculation method to be provided'},
-  {key:'missing',name:'Missing materials',icon:'package',disabled:false,desc:ar?`${N(info.missing.length)} صنف بدون رصيد`:`${N(info.missing.length)} items with no stock`},
-  {key:'surplus',name:'Surplus materials',icon:'packages',disabled:true,desc:'Calculation method to be provided'},
-  {key:'near_expiry',name:'Materials nearing expiry',icon:'calendar',disabled:false,desc:ar?`${N(info.near_expiry.length)} وجبة تنتهي قبل ${info.expiry_before||'—'}`:`${N(info.near_expiry.length)} stocked lots before ${info.expiry_before||'—'}`}
+  {key:'scarce',name:'Scarce materials',icon:'warning',desc:!statementScarcePct?'Enter a percentage to calculate':ar?`${N(info.scarce?.length||0)} صنف تحت نسبة ${statementScarcePct}٪`:`${N(info.scarce?.length||0)} items below ${statementScarcePct}%`},
+  {key:'missing',name:'Missing materials',icon:'package',desc:ar?`${N(info.missing.length)} صنف بدون رصيد`:`${N(info.missing.length)} items with no stock`},
+  {key:'surplus',name:'Surplus materials',icon:'packages',desc:!statementSurplusPct?'Enter a percentage to calculate':ar?`${N(info.surplus?.length||0)} صنف فوق نسبة ${statementSurplusPct}٪`:`${N(info.surplus?.length||0)} items above ${statementSurplusPct}%`},
+  {key:'near_expiry',name:'Materials nearing expiry',icon:'calendar',desc:ar?`${N(info.near_expiry.length)} وجبة قبل ${info.expiry_before||'—'}`:`${N(info.near_expiry.length)} lots before ${info.expiry_before||'—'}`}
  ];
- const cards=options.map(o=>`<button type="button" class="statement-card ${o.key===statementMode?'chosen':''}" data-statement="${o.key}" ${o.disabled?'disabled aria-disabled="true"':''}>
+ const cards=options.map(o=>`<button type="button" class="statement-card ${o.key===statementMode?'chosen':''}" data-statement="${o.key}">
   <span class="statement-card-icon">${I(o.icon)}</span>
-  <strong>${E(o.name)}</strong><span>${E(o.desc)}</span>
-  ${o.disabled?'<small class="statement-soon">Awaiting calculation rules</small>':'<small class="statement-open">View statement</small>'}
+  <strong>${E(o.name)}</strong><span>${E(o.desc)}</span><small class="statement-open">View statement</small>
  </button>`).join('');
- return `${head('Warehouse Statements','Current warehouse status: zero-stock items and batches approaching expiry. Scarce and surplus calculations are reserved for later.')}
+ const heading={scarce:'Scarce materials',surplus:'Surplus materials',missing:'Missing materials',near_expiry:'Materials nearing expiry'}[statementMode];
+ const explanation=isMissing?'Active registered items whose total stock is zero, including items without any received batch.':
+  isExpiry?ar?`الوجبات المتوفرة من ${info.as_of||'—'} إلى ${info.expiry_last_included||'—'} شاملاً. لا تُدرج الوجبات المنتهية.`:
+   `Unexpired stocked lots from ${info.as_of||'—'} through ${info.expiry_last_included||'—'}, inclusive.`:
+  ar?'تُحسب النسبة من الرصيد الصالح غير المنتهي (مع استبعاد الوجبات ذات الصلاحية غير المسجلة) مقارنةً بكمية الاحتياج السنوي.':
+     'The percentage compares dated, unexpired stock with annual requirement. Lots lacking an expiry date are excluded.';
+ const expiryControl=isExpiry?`<div class="statement-param-row"><label class="db-field statement-control"><span>Expiry before (exclusive)</span><input class="db-input" type="date" id="statementExpiryBefore" value="${E(info.expiry_before||'')}" min="1900-01-01" max="2200-12-31" required></label><button type="button" class="db-btn secondary small" data-reset-statement-expiry>Use default expiry period</button><span class="muted-hint">${ar?'الحد الافتراضي هو أول يوم من الشهر نفسه في السنة التالية؛ تاريخ القطع غير مشمول.':'Default: first day of this month next year; cutoff date is excluded.'}</span></div>`:'';
+ const percentControl=isPercent?`<div class="statement-param-row"><label class="db-field statement-control"><span>Annual requirement threshold (%)</span><input id="statementPercentInput" class="db-input" inputmode="decimal" type="number" min="0.01" max="1000" step="0.01" placeholder="${ar?'أدخل النسبة، مثال: 25':'Enter percentage, e.g. 25'}" value="${E(threshold)}"></label><button type="button" class="db-btn small" data-apply-statement-percent>Calculate statement</button><span class="muted-hint">${ar?'مثال: 25٪ للشحيحة تعني أقل من ربع الاحتياج؛ 125٪ للفائضة تعني أكثر من الاحتياج بربع. لا توجد نسب افتراضية مفروضة.':'Examples: scarce under 25%, surplus over 125%. No threshold is assumed by default.'}</span></div>`:'';
+ const count=isMissing?info.missing.length:isExpiry?info.near_expiry.length:(info[statementMode]?.length||0);
+ return `${head('Warehouse Statements','Compare stock to annual requirements, identify zero-stock items, or choose an expiry report cutoff.')}
  <div class="statement-grid">${cards}</div>
  <div class="db-panel statement-results">
- <div class="statement-result-head"><div><h2>${I(isMissing?'package':'calendar')} ${E(isMissing?'Missing materials':'Materials nearing expiry')}</h2>
- <p class="muted-hint">${E(isMissing?'Active registered items whose total stock is zero, including items without any received batch.':ar?`الوجبات المتوفرة التي تنتهي صلاحيتها من ${info.as_of||'—'} حتى ${info.expiry_last_included||'—'} شاملاً. تظهر كل وجبة وسعرها بشكل مستقل.`:`Usable lots expiring from ${info.as_of||'—'} through ${info.expiry_last_included||'—'} (inclusive). Each batch and price is shown separately.`)}</p></div>
- <span class="statement-count">${N(isMissing?info.missing.length:info.near_expiry.length)}</span></div>
- ${!isMissing&&info.expired_lot_count>0?`<div class="db-note warn">${ar?`${N(info.expired_lot_count)} وجبة منتهية الصلاحية مستبعدة من هذا الموقف. يمنع صرف المواد المنتهية.`:`${N(info.expired_lot_count)} expired stock lot(s) excluded from this near-expiry statement. Expired stock must not be issued.`}</div>`:''}
+ <div class="statement-result-head"><div><h2>${I(isMissing?'package':isExpiry?'calendar':'warning')} ${E(heading)}</h2><p class="muted-hint">${E(explanation)}</p></div>
+ <span class="statement-count">${N(count)}</span></div>
+ ${expiryControl}${percentControl}
+ ${isPercent?`<div class="db-note ${info.annual_need_unset_count>0?'warn':''}">${ar?`${N(info.annual_need_unset_count||0)} صنف بلا احتياج سنوي موجب؛ لم يتم احتسابها. أدخل الاحتياج السنوي لكل صنف من تعديل المادة.`:`${N(info.annual_need_unset_count||0)} items lack a positive annual requirement and are excluded. Edit items to enter their annual need.`}</div>`:''}
+ ${isExpiry&&info.expired_lot_count>0?`<div class="db-note warn">${ar?`${N(info.expired_lot_count)} وجبة منتهية الصلاحية مستبعدة من هذا الموقف.`:`${N(info.expired_lot_count)} expired stock lots excluded from this report.`}</div>`:''}
  <div class="db-toolbar statement-tools"><input class="db-input" type="search" id="statementSearch" placeholder="Search item, batch, book or code..." aria-label="Search statement"><select class="db-select" id="statementBranch"><option value="">All branches</option>${BRANCHES.map(([id,name])=>`<option value="${E(id)}">${E(name)}</option>`).join('')}</select><span class="muted-hint" id="statementShown"></span></div>
  <div id="statementTable" aria-live="polite"></div></div>`;
 }
 function filterStatement(){
  const el=$('#statementTable');if(!el)return;
- const info=cache.positions||{missing:[],near_expiry:[]};
- const isMissing=statementMode==='missing';
- const data=isMissing?info.missing:info.near_expiry;
+ const info=cache.positions||{missing:[],near_expiry:[],scarce:[],surplus:[]};
+ const isMissing=statementMode==='missing',isExpiry=statementMode==='near_expiry';
+ const threshold=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
+ if(!isExpiry&&!isMissing&&!threshold){el.innerHTML=msg('Enter a percentage to calculate','No percentage is assumed until you enter one.');return;}
+ const data=info[statementMode]||[];
  const query=normalizeItemSearch($('#statementSearch')?.value||'');
  const branch=$('#statementBranch')?.value||'';
  const filtered=data.filter(i=>(!branch||i.branch===branch)&&
     normalizeItemSearch([i.name,i.trade_name,i.generic_name,i.information,i.sku,i.category,i.batch_no,i.unit].join(' ')).includes(query));
  const columns=isMissing?['Item','Branch','Registered book','Available quantity']:
-   ['Item','Branch','Batch number','Expiry date','Quantity','Unit price (IQD)'];
+   isExpiry?['Item','Branch','Batch number','Expiry date','Quantity','Unit price (IQD)']:
+   ['Item','Branch','Registered book','Annual requirement','Usable stock','Percent of annual need'];
  const rows=filtered.map(i=>isMissing?
  `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)}</div></td><td>${E(branchName(i.branch))}</td><td>${E(i.category||'—')}</td><td>${badge('0 '+i.unit,'danger')}</td></tr>`:
- `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)} · ${E(i.category)}</div></td><td>${E(branchName(i.branch))}</td><td><strong>${E(i.batch_no)}</strong></td><td>${E(i.expiry_date)}</td><td>${N(i.stock)} ${E(i.unit)}</td><td>${priceLabel(i.unit_price_fils)}</td></tr>`).join('');
+ isExpiry?
+ `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)} · ${E(i.category)}</div></td><td>${E(branchName(i.branch))}</td><td><strong>${E(i.batch_no)}</strong></td><td>${E(i.expiry_date)}</td><td>${N(i.stock)} ${E(i.unit)}</td><td>${priceLabel(i.unit_price_fils)}</td></tr>`:
+ `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)}</div></td><td>${E(branchName(i.branch))}</td><td>${E(i.category||'—')}</td><td>${N(i.annual_need)} ${E(i.unit)}</td><td><strong>${N(i.stock)} ${E(i.unit)}</strong></td><td>${N(i.percent_of_need)}%</td></tr>`).join('');
  el.innerHTML=filtered.length?table(columns,rows):msg('No matching stock records','Try another search or branch.');
  const count=$('#statementShown');if(count)count.textContent=window.HWLang?.get()==='ar'?`${N(filtered.length)} من أصل ${N(data.length)} سجل`:`${N(filtered.length)} of ${N(data.length)} records`;
  window.HWLang?.apply();
@@ -477,6 +512,7 @@ function editItem(it=null){
   field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
   field('Price — دينار',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" required value="${it?.price_fils==null?'':Math.floor(it.price_fils/1000)}" placeholder="0">`, 'IQD per stock unit.'),
   field('Price — فلس',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" required value="${it?.price_fils==null?'':it.price_fils%1000}" placeholder="0 to 999">`, '1000 fils = 1 dinar.'),
+  wide(field('Annual requirement quantity',`<input name="annual_need" class="db-input" type="number" min="0" max="1000000000" step="1" inputmode="numeric" value="${it?.annual_need==null?'':E(it.annual_need)}" placeholder="${window.HWLang?.get()==='ar'?'الاحتياج خلال سنة كاملة':'Yearly quantity in stock units'}">`, 'Optional for existing items. Used to calculate scarce/surplus percentages.')),
   wide(field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Common names, Iraqi slang, abbreviations, alternate spellings...">${E(it?.information||'')}</textarea>`, 'All alternate names are searchable.'))
  ];
  if(it)f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
@@ -484,7 +520,7 @@ function editItem(it=null){
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.9</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.12</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
  window.HWLang?.apply();
 }
@@ -627,7 +663,9 @@ function completeMovementPapers(m){
 }
 document.addEventListener('click',async e=>{
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
- const statement=e.target.closest('[data-statement]:not([disabled])');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
+ const statement=e.target.closest('[data-statement]');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
+ if(e.target.closest('[data-reset-statement-expiry]')){statementExpiryBefore='';try{await reloadPositions()}catch(err){toast(err.message,'error')}return;}
+ if(e.target.closest('[data-apply-statement-percent]')){try{await applyStatementPercent()}catch(err){toast(err.message,'error')}return;}
  const trigger=e.target.closest('[data-dept-trigger]');if(trigger){const picker=trigger.closest('[data-dept-picker]');if(picker.querySelector('[data-dept-popup]').hidden)openDepartmentPicker(picker);else closeDepartmentPicker(picker);return}
  const option=e.target.closest('[data-dept-option]');if(option){selectDepartment(option.closest('[data-dept-picker]'),option);return}
  if(!e.target.closest('[data-dept-picker]'))document.querySelectorAll('[data-dept-picker]').forEach(closeDepartmentPicker);
@@ -664,14 +702,28 @@ document.addEventListener('submit',async e=>{
  }catch(err){toast(err.message,'error')}
  finally{if(document.body.contains(button))button.disabled=false}
 });
+async function applyStatementPercent(){
+ const inp=$('#statementPercentInput');if(!inp)return;
+ if(inp.value && !inp.checkValidity())throw Error('Percentage must be above zero and at most 1000, with up to two decimals.');
+ const next=inp.value.trim();
+ const old=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
+ if(statementMode==='scarce')statementScarcePct=next;else statementSurplusPct=next;
+ try{await reloadPositions()}catch(e){if(statementMode==='scarce')statementScarcePct=old;else statementSurplusPct=old;throw e}
+}
 document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInventory();
  if(e.target.id==='statementSearch')filterStatement();
  if(e.target.id==='movementFilter')filterMovements();
  if(e.target.id==='departmentFilter')filterDepartmentTable();
  if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
  if(e.target.matches('[data-dept-search]'))filterDeptPicker(e.target.closest('[data-dept-picker]'));});
-document.addEventListener('change',e=>{
+document.addEventListener('change',async e=>{
  if(e.target.id==='statementBranch')filterStatement();
+ if(e.target.id==='statementExpiryBefore'){
+  const old=statementExpiryBefore;
+  statementExpiryBefore=e.target.value;
+  try{await reloadPositions()}catch(err){statementExpiryBefore=old;toast(err.message,'error')}
+ }
+ if(e.target.id==='statementPercentInput'){try{await applyStatementPercent()}catch(err){toast(err.message,'error')}}
  if(e.target.matches('[data-issue-product]'))syncIssueProduct(e.target.closest('[data-issue-line]'));
  if(e.target.matches('[data-issue-batch]'))syncIssueBatch(e.target.closest('[data-issue-line]'));
  if(e.target.id==='movementType')filterMovements();

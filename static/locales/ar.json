@@ -584,7 +584,7 @@
   "Explain why earlier-expiring available stock is not being issued": "اذكر سبب عدم صرف الوجبة الأقرب انتهاءً رغم توفر رصيد صالح منها",
   "Lots are sorted by earliest usable expiry. A later-expiring lot requires a recorded exception reason if an earlier-expiring lot still has stock. Expired lots cannot be issued.": "تُرتّب الوجبات حسب أقرب تاريخ صلاحية. صرف وجبة أحدث مع توفر رصيد صالح من وجبة أقرب انتهاءً يتطلب توثيق سبب الاستثناء. لا يمكن صرف الوجبات منتهية الصلاحية.",
   "Warehouse Statements": "المواقف",
-  "Current warehouse status: zero-stock items and batches approaching expiry. Scarce and surplus calculations are reserved for later.": "مواقف المخزن: المواد المفقودة والمواد القريبة من انتهاء الصلاحية. سيتم إضافة حسابات المواد الشحيحة والفائضة لاحقاً.",
+  "Current warehouse status: zero-stock items and batches approaching expiry. Scarce and surplus calculations are reserved for later.": "مواقف المخزن: المواد المفقودة وقريبة النفاذ والشحيحة والفائضة وفق الاحتياج السنوي.",
   "Scarce materials": "موقف المواد الشحيحة",
   "Missing materials": "موقف المواد المفقودة",
   "Surplus materials": "موقف المواد الفائضة",
@@ -597,5 +597,18 @@
   "No matching stock records": "لا توجد مواد مطابقة",
   "Try another search or branch.": "جرّب البحث بكلمة أخرى أو اختر فرعاً مختلفاً.",
   "Registered book": "السجل المعتمد",
-  "Available quantity": "الرصيد المتوفر"
+  "Available quantity": "الرصيد المتوفر",
+  "Annual requirement quantity": "كمية الاحتياج السنوي",
+  "Annual requirement": "كمية الاحتياج السنوي",
+  "Optional for existing items. Used to calculate scarce/surplus percentages.": "اختياري للأصناف السابقة؛ يُستخدم لاحتساب مواقف المواد الشحيحة والفائضة.",
+  "Yearly quantity in stock units": "الاحتياج السنوي بوحدة المادة",
+  "Expiry before (exclusive)": "تاريخ الصلاحية قبل",
+  "Use default expiry period": "استعادة المدة الافتراضية",
+  "Annual requirement threshold (%)": "النسبة من الاحتياج السنوي (%)",
+  "Calculate statement": "احتساب الموقف",
+  "Enter a percentage to calculate": "أدخل النسبة المئوية لاحتساب الموقف",
+  "No percentage is assumed until you enter one.": "لم نحدد نسبة افتراضية. أدخل النسبة المطلوبة لعرض المواد.",
+  "Usable stock": "الرصيد الصالح",
+  "Percent of annual need": "النسبة من الاحتياج السنوي",
+  "Compare stock to annual requirements, identify zero-stock items, or choose an expiry report cutoff.": "قارن رصيد المخزن بالاحتياج السنوي، أو اعرض المواد المفقودة وقريبة النفاذ مع اختيار تاريخ القطع."
 }

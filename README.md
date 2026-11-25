@@ -1,46 +1,37 @@
-# Hospital Warehouse IMS — Version 4.9
+# Hospital Warehouse IMS — V4.12
 
-Arabic-first, bilingual, single-warehouse inventory testing application. Includes the existing Home, Login, Dashboard, FastAPI backend, SQLite database, user permissions, batch/lot-based stock, prices in Iraqi dinars/fils, 3 outgoing routes, 4 incoming routes, a permanent movement ledger, and administrator Backup & Restore.
+Arabic-first bilingual, single-warehouse inventory application for testing on Railway. Home, Login, Dashboard, inventory, department and staff accounts, permissions, branches/books, multiple priced lots and expiries, 7 shipment routes, FEFO issuing safeguards, movement history, and administrator Backup & Restore remain available.
 
-**This is an incremental code update for your EXISTING private GitHub repository and Railway service, NOT a replacement database.**
+## V4.12 — What changed
 
-## V4.9 changes
+- **كمية الاحتياج السنوي (Annual requirement quantity)** is now stored per registered item, as a whole-number quantity in that item's existing unit. Create/Edit Item contains the new field after the Iraqi dinar/fils price fields; inventory lists the saved quantity. Older items are marked **not entered** (`NULL`), never silently treated as zero. Existing records, receipt lots, movement prices, and stock counts are unchanged.
+- **موقف المواد قريبة النفاذ** keeps the V4.11 default reporting window (through the last day of the current month in the next year), but staff can select any **expiration before** cutoff date and reset to the default. The specified cutoff is *exclusive*: e.g., "before 2027-12-01" includes dates through Nov 30, 2027. Expired lots are excluded.
+- **موقف المواد الشحيحة** and **موقف المواد الفائضة** are available with **user-entered percentages**. There are NO assumed official thresholds. For an item with annual need 1000, a scarcity threshold of 25% flags usable stock below 250; a surplus threshold of 125% flags usable stock above 1250. Comparisons are strict (< for scarce, > for surplus). Reports display remaining quantity, annual need, and calculated percentage.
+- To avoid presenting expired stock as available, percentage reports count only dated, **unexpired** lots. Lots with no recorded expiry are excluded pending verification. Catalog items without a positive saved annual requirement are excluded from percentage classifications and counted separately in the report notice.
+- **موقف المواد المفقودة** remains a separate report for items with zero *physical* balance, including items never received. It is not the same as scarcity.
+- Data structure migrated additively to **SQLite schema V8**; no reset or overwrite is needed. V4.11 database upgrades and V4.11 backup restore were tested.
 
-1. **تجهيز طلبية — outgoing item lines:** Product, **specific received lot / الوجبة**, lot expiry (automatically displayed), quantity, **دينار**, and **فلس**. The selectable lot determines the true batch/expiry and available balance. The outgoing unit price defaults to its received-lot price but may be changed **for that outgoing movement only**. Both the original receipt lot price and the outgoing historical price are preserved separately.
-2. **تعديلات المخزون:** The duplicate department return form is removed. Department returns are still available through **استلام الشحنات → إرجاع طلبية داخلية**. The audited inventory adjustments screen remains.
-3. **59 starter departments:** All names provided by the warehouse are preloaded once into any current database that has not received this V4.9 seed. Existing departments are not deleted or overwritten. Users can **add, rename or deactivate** departments. A one-time seed marker prevents a renamed default department from reappearing on subsequent restarts.
-4. **Department search:** A searchable dropdown with a search field at the **top of the open menu** is used when selecting departments for outgoing issues and incoming internal returns. The Departments management page has an additional search filter.
-5. Arabic remains the default. The approved light theme and all existing branches, books, authorization documents and permissions remain unchanged.
+Detailed change and calculation notes: `V4_12_CHANGES.md`.
 
-See `V4_9_CHANGES.md` and `department_catalog.py` for implementation details and the exact 59 department names.
+## Deploying updates safely on your current Railway service
 
-## Updating Railway safely
+1. Sign in as an administrator and **export a database backup**. Store it securely: backup ZIPs contain operational data and password hashes and are not encrypted by this build.
+2. Confirm your existing Railway service has the persistent database volume attached at `/data` and `WAREHOUSE_DATA_DIR=/data`. Do **not** create a new database or detach/delete the current volume.
+3. Extract this ZIP and push the **source files** to the root of your **existing private GitHub repository**. Do not upload backup ZIPs, SQLite files, `data/`, or passwords.
+4. Redeploy the **same Railway service** from GitHub.
+5. Verify `https://YOUR-SITE/api/health` includes `"release":"4.12.0"` and `"version":8`. Open Inventory → Add Item and المواقف to confirm the updated fields and report controls.
+6. Check some pre-existing items, accounts, departments, lots and outgoing movements after deployment before testing new entries.
 
-1. Download an administrator backup from the running app's **Backup & Restore** page, and store the archive privately (it contains sensitive operational data and password hashes; it is not encrypted).
-2. Verify the same Railway service has its existing persistent volume mounted at `/data`, with `WAREHOUSE_DATA_DIR=/data`.
-3. Update **source files only** in the root of the existing private GitHub repository. Do not upload SQLite data files, database backups, or environment secrets to GitHub.
-4. Redeploy the **same** Railway service. Do not delete, replace, or detach the existing volume.
-5. Visit `https://YOUR-DOMAIN/api/health` and verify `"release":"4.10.0"` and `"version":7`.
-6. Check a pre-existing movement, a pre-existing department, the 59 preloaded department names, the searchable department picker, and an outgoing transaction using a test batch with two distinct receipt prices. Inspect its historical outgoing price.
+This is a test build, **not** a validated production clinical inventory system. Keep one Railway worker/replica with SQLite; secure the public administrator credentials and backups, and do not enter patient-identifiable or confidential hospital data during testing.
 
-**Database schema version remains 7.** The new departments are added non-destructively. V4.8 backups remain compatible.
+## Tests
 
-## Local test
+When dependencies from `requirements.txt` are installed:
 
 ```bash
-pip install -r requirements.txt
-python test_v49_regression.py
-uvicorn app:app --host 127.0.0.1 --port 8000
+python test_v412.py
+python test_v412_fefo.py
+python test_v412_regression.py
 ```
 
-Local demonstration-only initial login is `enki` / `123`. **Never use that password on an internet-facing Railway service.** Public deployments require a strong admin bootstrap password stored privately in Railway variables; see `RAILWAY_SETUP.md`.
-
-For Arabic wording edits, use `static/locales/ar.json`. Product/department names entered into the database are not translated automatically.
-
-## Important operational limits
-
-This is still a multi-user **testing build**, not a validated clinical inventory system. Use fictitious stock while testing. The manual exported backups are unencrypted; keep them off public drives/chats. Implement production-grade access auditing, rate limits, encrypted off-site backups and restore drills before relying on this software for actual hospital operations.
-
-## V4.11 — المواقف / Warehouse Statements
-
-Added a dedicated read-only dashboard tab with functioning **Missing materials** (zero stock) and **Materials nearing expiry** (dated, stocked lots through the last day of this month next year), plus intentionally disabled **Scarce materials** and **Surplus materials** buttons pending calculation rules. See `V4_11_WAREHOUSE_STATEMENTS.md`. No database schema change; keep the existing Railway volume and data.
+Each test uses its own temporary data directory; the scripts must not be run against a live Railway database. A V4.11 in-place migration and V4.11 ZIP backup restoration were also tested separately. The local browser preview was blocked in this environment, so review the live visual layout after deployment.
