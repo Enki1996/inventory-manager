@@ -51,7 +51,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 8
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.12.0'
+APP_RELEASE = '4.13.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -864,6 +864,38 @@ def batches(request: Request):
                                              i.sku,i.name item_name,i.unit,i.category,i.branch,i.active item_active
                                              FROM batches b JOIN items i ON i.id=b.item_id
                                              ORDER BY b.on_hand DESC,i.name,b.expiry_date''')]
+
+
+@app.get('/api/items/{item_id}/history')
+def item_full_history(item_id: int, request: Request, limit: int = 50, offset: int = 0):
+    """Read-only, paginated stock ledger for one product; all recorded batches/prices.
+
+    Kept separate from /api/movements (which deliberately limits its summary to
+    the latest 500 transactions). This endpoint does not modify inventory.
+    """
+    get_user(request)
+    if limit < 1 or limit > 100 or offset < 0:
+        err(422, 'Invalid history page (limit 1–100 and offset >= 0)')
+    with db(readonly=True) as c:
+        if not c.execute('SELECT 1 FROM items WHERE id=?', (item_id,)).fetchone():
+            err(404, 'Item not found')
+        count = c.execute("""SELECT COUNT(*) AS n FROM movement_lines ml
+                              JOIN batches b ON b.id=ml.batch_id
+                              WHERE b.item_id=?""", (item_id,)).fetchone()['n']
+        rows = c.execute("""SELECT ml.id,ml.qty,ml.direction,ml.unit_price_fils,
+                                  b.batch_no,b.expiry_date,m.code,m.kind,m.route,
+                                  m.created_at,m.paper_ref,m.dispatch_ref,m.source,
+                                  m.external_destination,d.name AS department_name,
+                                  u.username AS operator
+                           FROM movement_lines ml
+                           JOIN batches b ON b.id=ml.batch_id
+                           JOIN movements m ON m.id=ml.movement_id
+                           LEFT JOIN departments d ON d.id=m.department_id
+                           JOIN users u ON u.id=m.created_by
+                           WHERE b.item_id=? ORDER BY ml.id DESC LIMIT ? OFFSET ?""",
+                         (item_id, limit, offset)).fetchall()
+        return {'item_id':item_id, 'total':count, 'offset':offset,
+                'limit':limit,'rows':[dict(r) for r in rows]}
 
 
 @app.get('/api/movements')

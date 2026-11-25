@@ -1,3 +1,7 @@
+# Hospital Warehouse IMS — V4.13
+
+Read V4_13_CHANGES.md for the combined inventory, expandable lot details, configurable columns and per-item movement history.
+
 # Hospital Warehouse IMS — V4.12
 
 Arabic-first bilingual, single-warehouse inventory application for testing on Railway. Home, Login, Dashboard, inventory, department and staff accounts, permissions, branches/books, multiple priced lots and expiries, 7 shipment routes, FEFO issuing safeguards, movement history, and administrator Backup & Restore remain available.

@@ -38,6 +38,23 @@
     if(m)return `تم حفظ الحركة ${m[1]} وتحديث رصيد المخزن.`;
     m=s.match(/^(.+) · Batch ([^·]+) · (.+) · Exp (.+)$/);
     if(m)return `${m[1]} · تشغيلة ${m[2]} · ${m[3]} · الصلاحية ${m[4]}`;
+    // V4.13 count text on detailed Inventory / المواقف tables.
+    m=s.match(/^([\d,]+) of ([\d,]+) items · ([\d,]+) matching records$/);
+    if(m)return `${m[1]} من أصل ${m[2]} صنف · ${m[3]} سجل مطابق`;
+    m=s.match(/^([\d,]+) of ([\d,]+) items$/);
+    if(m)return `${m[1]} من أصل ${m[2]} صنف`;
+    m=s.match(/^([\d,]+) recorded line\(s\)$/);
+    if(m)return `${m[1]} حركة مسجلة`;
+    m=s.match(/^([\d,]+) stored lot\(s\)$/);
+    if(m)return `${m[1]} وجبة محفوظة`;
+    m=s.match(/^([\d,]+) lots?$/);
+    if(m)return `${m[1]} وجبة`;
+    m=s.match(/^([\d,]+) expiring lots before ([0-9-]+)$/);
+    if(m)return `${m[1]} وجبة قريبة النفاذ قبل ${m[2]}`;
+    m=s.match(/^([\d,]+) items with no stock$/);
+    if(m)return `${m[1]} صنف بدون رصيد`;
+    m=s.match(/^([\d,]+) items (below|above) ([\d.]+)%$/);
+    if(m)return `${m[1]} صنف ${m[2]==='below'?'أقل من':'أكثر من'} ${m[3]}٪`;
     m=s.match(/^([0-9]+) item\(s\) under the reorder threshold/);
     if(m)return s.replace(' item(s) under the reorder threshold',' صنف دون حد التنبيه');
     return original;
