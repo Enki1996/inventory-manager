@@ -34,3 +34,7 @@ WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD=<a strong secret of at least 14 characters>
 - Downloaded backups are unencrypted and contain sensitive data, including password hashes. Store them securely. Arrange off-site backup copies and regularly test recovery.
 - SQLite requires one server worker with a single writable database; multiple replicas are not supported by this build. For broader hospital-wide use, migrate to a managed PostgreSQL database with carefully tested migrations.
 - Do not enter patient or confidential hospital data into this test build; this has not undergone production security and clinical inventory validation.
+
+## V4.11 update
+
+Only application code changes. The persistent SQLite schema remains **7**. Keep the existing mounted `/data` volume. After deploying from GitHub, check `/api/health` for release **4.11.0**, then open **المواقف**. Details: `V4_11_WAREHOUSE_STATEMENTS.md`.

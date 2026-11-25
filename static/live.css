@@ -114,3 +114,17 @@
 .fefo-override{background:#fff6ef;border:1px solid #eecab4;border-radius:12px;padding:15px;margin:10px 0}
 .fefo-override .db-field{color:#9a4935}
 [data-fefo-summary]{margin-bottom:10px}
+
+/* V4.11: accessible light-theme warehouse statements (المواقف). */
+.statement-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:4px 0 20px}
+.statement-card{display:flex;flex-direction:column;text-align:start;align-items:flex-start;gap:9px;min-height:173px;padding:19px 16px;border:1px solid #d6e8ed;border-radius:16px;background:linear-gradient(135deg,#fff,#f4fbfc);box-shadow:0 9px 21px rgba(38,102,125,.05);cursor:pointer;color:#23465c;font-family:inherit}
+.statement-card:hover:not(:disabled),.statement-card:focus-visible:not(:disabled){border-color:#27a9a4;box-shadow:0 9px 23px rgba(14,151,143,.15);outline:0}
+.statement-card.chosen{border:2px solid #0aa6a1;background:linear-gradient(130deg,#e7faf9,#fff);padding:18px 15px}
+.statement-card:disabled{opacity:.67;cursor:not-allowed;background:#f5f8fa}
+.statement-card-icon{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;color:#0c9795;background:#e4f8f6}
+.statement-card-icon .i{width:23px;height:23px}.statement-card strong{font-size:14px;line-height:1.5}.statement-card>span:not(.statement-card-icon){font-size:11px;color:#628396;line-height:1.5}
+.statement-card small{font-size:10px;font-weight:800;margin-top:auto;color:#0c8c88}.statement-card .statement-soon{color:#8c9da9}
+.statement-result-head{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px}.statement-result-head h2{margin:0 0 6px}.statement-result-head p{margin:0;max-width:740px}.statement-count{background:#e5f8f8;color:#087f7a;border-radius:13px;padding:10px 15px;font-size:22px;font-weight:800;min-width:55px;text-align:center}
+.statement-tools{justify-content:flex-start}.statement-tools #statementBranch{width:min(235px,100%)}.statement-tools input{min-width:210px}
+@media(max-width:1140px){.statement-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.statement-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.statement-card{padding:12px;min-height:160px}.statement-card.chosen{padding:11px}.statement-card strong{font-size:12px}.statement-result-head{align-items:flex-start}.statement-tools #statementBranch{width:100%}}

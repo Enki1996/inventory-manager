@@ -1,4 +1,4 @@
-/* Live V4.10 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.11 bilingual warehouse prototype: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -10,9 +10,9 @@ const fmtDate = str=>new Date(str).toLocaleString(window.HWLang?.get()==='ar'?'a
 const D = str=>str?`<time class="localized-time" datetime="${E(str)}">${E(fmtDate(str))}</time>`:'—';
 const badge = (label,kind='neutral')=>`<span class="pill ${kind}">${E(label)}</span>`;
 const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E(title)}</strong><span class="muted-hint">${E(sub)}</span></div>`;
-let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,books:{},units:{},staff:[]}, toastTimer;
+let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,positions:null,books:{},units:{},staff:[]}, toastTimer;
 let inlineNewItem=null; // Pending shipment line; kept intact while the item modal is open.
-const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
+const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
 const branchName=b=>BRANCHES.find(x=>x[0]===b)?.[1]||'Unassigned — admin classification needed';
@@ -68,7 +68,7 @@ function toast(text,kind='ok'){
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),5000)
 }
 async function refreshData(){
-  const endpoints=['items','departments','batches','movements','dashboard','books','units','staff-directory'];
+  const endpoints=['items','departments','batches','movements','dashboard','positions','books','units','staff-directory'];
   const rows=await Promise.all(endpoints.map(path=>api('/api/'+path)));
   for(let i=0;i<endpoints.length;i++)cache[endpoints[i]==='staff-directory'?'staff':endpoints[i]]=rows[i];
   if(can('users'))cache.users=await api('/api/users');
@@ -395,14 +395,59 @@ function reports(){const low=cache.items.filter(x=>x.active&&x.min_stock>0&&x.st
 return `${head('Warehouse reports','Basic live summaries derived from your saved records. Spreadsheet and PDF reports can be added after we finalize the workflow.')}
 <div class="db-kpis"><div class="db-kpi"><span class="name">${I('package')} Products</span><span class="num">${N(cache.items.length)}</span></div><div class="db-kpi"><span class="name">${I('warning')} Low stock</span><span class="num">${N(low.length)}</span></div><div class="db-kpi"><span class="name">${I('outgoing')} Distribution slips</span><span class="num">${N(total)}</span></div><div class="db-kpi"><span class="name">${I('history')} Total transactions</span><span class="num">${N(cache.movements.length)}</span></div></div>
 ${panel('Low-stock products',table(['SKU','Item','Current units','Minimum threshold'],low.map(x=>`<tr><td>${E(x.sku)}</td><td>${E(x.name)}</td><td>${N(x.stock)} ${E(x.unit)}</td><td>${N(x.min_stock)}</td></tr>`)),'warning')}`}
+// V4.11 — read-only warehouse status statements (المواقف).
+let statementMode='missing';
+function warehouseStatements(){
+ const info=cache.positions || {missing:[],near_expiry:[],expired_lot_count:0,as_of:'',expiry_last_included:''};
+ const isMissing=statementMode==='missing';
+ const ar=window.HWLang?.get()!=='en';
+ const options=[
+  {key:'scarce',name:'Scarce materials',icon:'warning',disabled:true,desc:'Calculation method to be provided'},
+  {key:'missing',name:'Missing materials',icon:'package',disabled:false,desc:ar?`${N(info.missing.length)} صنف بدون رصيد`:`${N(info.missing.length)} items with no stock`},
+  {key:'surplus',name:'Surplus materials',icon:'packages',disabled:true,desc:'Calculation method to be provided'},
+  {key:'near_expiry',name:'Materials nearing expiry',icon:'calendar',disabled:false,desc:ar?`${N(info.near_expiry.length)} وجبة تنتهي قبل ${info.expiry_before||'—'}`:`${N(info.near_expiry.length)} stocked lots before ${info.expiry_before||'—'}`}
+ ];
+ const cards=options.map(o=>`<button type="button" class="statement-card ${o.key===statementMode?'chosen':''}" data-statement="${o.key}" ${o.disabled?'disabled aria-disabled="true"':''}>
+  <span class="statement-card-icon">${I(o.icon)}</span>
+  <strong>${E(o.name)}</strong><span>${E(o.desc)}</span>
+  ${o.disabled?'<small class="statement-soon">Awaiting calculation rules</small>':'<small class="statement-open">View statement</small>'}
+ </button>`).join('');
+ return `${head('Warehouse Statements','Current warehouse status: zero-stock items and batches approaching expiry. Scarce and surplus calculations are reserved for later.')}
+ <div class="statement-grid">${cards}</div>
+ <div class="db-panel statement-results">
+ <div class="statement-result-head"><div><h2>${I(isMissing?'package':'calendar')} ${E(isMissing?'Missing materials':'Materials nearing expiry')}</h2>
+ <p class="muted-hint">${E(isMissing?'Active registered items whose total stock is zero, including items without any received batch.':ar?`الوجبات المتوفرة التي تنتهي صلاحيتها من ${info.as_of||'—'} حتى ${info.expiry_last_included||'—'} شاملاً. تظهر كل وجبة وسعرها بشكل مستقل.`:`Usable lots expiring from ${info.as_of||'—'} through ${info.expiry_last_included||'—'} (inclusive). Each batch and price is shown separately.`)}</p></div>
+ <span class="statement-count">${N(isMissing?info.missing.length:info.near_expiry.length)}</span></div>
+ ${!isMissing&&info.expired_lot_count>0?`<div class="db-note warn">${ar?`${N(info.expired_lot_count)} وجبة منتهية الصلاحية مستبعدة من هذا الموقف. يمنع صرف المواد المنتهية.`:`${N(info.expired_lot_count)} expired stock lot(s) excluded from this near-expiry statement. Expired stock must not be issued.`}</div>`:''}
+ <div class="db-toolbar statement-tools"><input class="db-input" type="search" id="statementSearch" placeholder="Search item, batch, book or code..." aria-label="Search statement"><select class="db-select" id="statementBranch"><option value="">All branches</option>${BRANCHES.map(([id,name])=>`<option value="${E(id)}">${E(name)}</option>`).join('')}</select><span class="muted-hint" id="statementShown"></span></div>
+ <div id="statementTable" aria-live="polite"></div></div>`;
+}
+function filterStatement(){
+ const el=$('#statementTable');if(!el)return;
+ const info=cache.positions||{missing:[],near_expiry:[]};
+ const isMissing=statementMode==='missing';
+ const data=isMissing?info.missing:info.near_expiry;
+ const query=normalizeItemSearch($('#statementSearch')?.value||'');
+ const branch=$('#statementBranch')?.value||'';
+ const filtered=data.filter(i=>(!branch||i.branch===branch)&&
+    normalizeItemSearch([i.name,i.trade_name,i.generic_name,i.information,i.sku,i.category,i.batch_no,i.unit].join(' ')).includes(query));
+ const columns=isMissing?['Item','Branch','Registered book','Available quantity']:
+   ['Item','Branch','Batch number','Expiry date','Quantity','Unit price (IQD)'];
+ const rows=filtered.map(i=>isMissing?
+ `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)}</div></td><td>${E(branchName(i.branch))}</td><td>${E(i.category||'—')}</td><td>${badge('0 '+i.unit,'danger')}</td></tr>`:
+ `<tr><td><strong>${E(i.trade_name||i.name)}</strong><div class="tiny">${E(i.sku)} · ${E(i.name)} · ${E(i.category)}</div></td><td>${E(branchName(i.branch))}</td><td><strong>${E(i.batch_no)}</strong></td><td>${E(i.expiry_date)}</td><td>${N(i.stock)} ${E(i.unit)}</td><td>${priceLabel(i.unit_price_fils)}</td></tr>`).join('');
+ el.innerHTML=filtered.length?table(columns,rows):msg('No matching stock records','Try another search or branch.');
+ const count=$('#statementShown');if(count)count.textContent=window.HWLang?.get()==='ar'?`${N(filtered.length)} من أصل ${N(data.length)} سجل`:`${N(filtered.length)} of ${N(data.length)} records`;
+ window.HWLang?.apply();
+}
 function settings(){return `${head('Settings and account security','Update your own password. Management can also review a separate audit trail.')}
 ${panel('Change your password',`<form id="passwordForm" class="db-form" style="max-width:530px"><div class="db-grid">${field('Current password',inp('current_password','','password','required autocomplete="current-password"'))}${field('New password (8+ characters)',inp('new_password','','password','required minlength="8" autocomplete="new-password"'))}</div><button type="submit" class="db-btn" style="justify-self:start">Update password</button></form>`,'lock')}
 ${can('item_write')?panel('Operations audit trail',`<div id="auditLog">Loading events...</div>`,'history'):''}`}
-const pages={overview,inventory,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
+const pages={overview,inventory,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
 function showPage(next){
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup')))next='overview';
  view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
- $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
+ $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
  if(next==='settings'&&can('item_write'))loadAudit();
  window.scrollTo({top:0,behavior:'instant'});
 }
@@ -582,6 +627,7 @@ function completeMovementPapers(m){
 }
 document.addEventListener('click',async e=>{
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
+ const statement=e.target.closest('[data-statement]:not([disabled])');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
  const trigger=e.target.closest('[data-dept-trigger]');if(trigger){const picker=trigger.closest('[data-dept-picker]');if(picker.querySelector('[data-dept-popup]').hidden)openDepartmentPicker(picker);else closeDepartmentPicker(picker);return}
  const option=e.target.closest('[data-dept-option]');if(option){selectDepartment(option.closest('[data-dept-picker]'),option);return}
  if(!e.target.closest('[data-dept-picker]'))document.querySelectorAll('[data-dept-picker]').forEach(closeDepartmentPicker);
@@ -619,11 +665,13 @@ document.addEventListener('submit',async e=>{
  finally{if(document.body.contains(button))button.disabled=false}
 });
 document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInventory();
+ if(e.target.id==='statementSearch')filterStatement();
  if(e.target.id==='movementFilter')filterMovements();
  if(e.target.id==='departmentFilter')filterDepartmentTable();
  if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
  if(e.target.matches('[data-dept-search]'))filterDeptPicker(e.target.closest('[data-dept-picker]'));});
 document.addEventListener('change',e=>{
+ if(e.target.id==='statementBranch')filterStatement();
  if(e.target.matches('[data-issue-product]'))syncIssueProduct(e.target.closest('[data-issue-line]'));
  if(e.target.matches('[data-issue-batch]'))syncIssueBatch(e.target.closest('[data-issue-line]'));
  if(e.target.id==='movementType')filterMovements();
@@ -675,3 +723,13 @@ document.addEventListener('keydown',e=>{
 }catch(e){$('#dashboardView').innerHTML=msg('Database unavailable',e.message);toast(e.message,'error')}})();
 
 window.addEventListener('warehouse:languagechange',()=>{document.querySelectorAll('time.localized-time[datetime]').forEach(el=>{el.textContent=fmtDate(el.getAttribute('datetime'))});if(view==='inventory')filterInventory();if(view==='distribution')updateFefoNotices()});
+
+// Refresh language-dependent report counters without reloading or losing user filters.
+window.addEventListener('warehouse:languagechange',()=>{
+ if(view!=='positions')return;
+ const search=$('#statementSearch')?.value||'',branch=$('#statementBranch')?.value||'';
+ $('#dashboardView').innerHTML=warehouseStatements();
+ if($('#statementSearch'))$('#statementSearch').value=search;
+ if($('#statementBranch'))$('#statementBranch').value=branch;
+ filterStatement();window.HWLang?.apply();
+});

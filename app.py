@@ -50,7 +50,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 7
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.10.0'
+APP_RELEASE = '4.11.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -1110,6 +1110,60 @@ def dashboard_data(request: Request):
         soon = c.execute('''SELECT COUNT(*) n FROM batches WHERE on_hand>0 AND expiry_date IS NOT NULL
                             AND expiry_date>=date('now') AND expiry_date<=date('now','+60 days')''').fetchone()['n']
         return {'items':total_items,'stock':total_units,'departments':dept,'movements':movements_count,'low_stock':low,'expiry_soon':soon}
+
+
+# V4.11 — Warehouse status statements (المواقف): read-only summaries.
+# Note that our approved expiry window is calendar-month based: through the last
+# day of the current month *next year*, not a rolling 365-day period.
+def position_window():
+    today = dt.datetime.now(ZoneInfo('Asia/Baghdad')).date()
+    year, month = today.year + 1, today.month
+    next_month = dt.date(year + (month == 12), month % 12 + 1, 1)
+    cutoff_exclusive = next_month.isoformat()
+    last_included = (next_month - dt.timedelta(days=1)).isoformat()
+    return today.isoformat(), cutoff_exclusive, last_included
+
+
+@app.get('/api/positions')
+def warehouse_positions(request: Request):
+    get_user(request)  # Reports are visible to authenticated staff, like inventory.
+    today, end_exclusive, last_included = position_window()
+    with db(readonly=True) as c:
+        # Zero-stock includes catalog entries with no batches at all.
+        missing = [dict(r) for r in c.execute('''
+            SELECT i.id AS item_id, i.sku, i.name, i.trade_name, i.generic_name, i.information, i.branch,
+                   i.category, i.unit, COALESCE(SUM(b.on_hand), 0) AS stock,
+                   COUNT(b.id) AS lot_count
+            FROM items i LEFT JOIN batches b ON b.item_id = i.id
+            WHERE i.active = 1
+            GROUP BY i.id
+            HAVING COALESCE(SUM(b.on_hand), 0) <= 0
+            ORDER BY i.branch, i.name COLLATE NOCASE, i.id
+        ''')]
+        # A dated lot counts only if it has physical stock and has not yet expired.
+        # Keep separate rows for different lots, prices and batch references.
+        expiring = [dict(r) for r in c.execute('''
+            SELECT b.id AS lot_id, i.id AS item_id, i.sku, i.name,
+                   i.trade_name, i.generic_name, i.information, i.branch, i.category, i.unit,
+                   b.batch_no, b.expiry_date, b.unit_price_fils,
+                   b.on_hand AS stock
+            FROM batches b JOIN items i ON i.id=b.item_id
+            WHERE i.active=1 AND b.on_hand > 0
+              AND b.expiry_date >= ? AND b.expiry_date < ?
+            ORDER BY b.expiry_date ASC, i.name COLLATE NOCASE, b.id
+        ''', (today, end_exclusive))]
+        expired_stock = c.execute('''
+            SELECT COUNT(*) AS lots FROM batches b JOIN items i ON i.id=b.item_id
+            WHERE i.active=1 AND b.on_hand>0 AND b.expiry_date IS NOT NULL
+              AND b.expiry_date < ?
+        ''', (today,)).fetchone()['lots']
+    return {
+        'as_of': today, 'expiry_before': end_exclusive,
+        'expiry_last_included': last_included,
+        'missing': missing, 'near_expiry': expiring,
+        'expired_lot_count': expired_stock,
+        'pending_calculations': ['scarce', 'surplus']
+    }
 
 
 @app.get('/api/staff-directory')

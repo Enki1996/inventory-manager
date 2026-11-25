@@ -40,3 +40,7 @@ For Arabic wording edits, use `static/locales/ar.json`. Product/department names
 ## Important operational limits
 
 This is still a multi-user **testing build**, not a validated clinical inventory system. Use fictitious stock while testing. The manual exported backups are unencrypted; keep them off public drives/chats. Implement production-grade access auditing, rate limits, encrypted off-site backups and restore drills before relying on this software for actual hospital operations.
+
+## V4.11 — المواقف / Warehouse Statements
+
+Added a dedicated read-only dashboard tab with functioning **Missing materials** (zero stock) and **Materials nearing expiry** (dated, stocked lots through the last day of this month next year), plus intentionally disabled **Scarce materials** and **Surplus materials** buttons pending calculation rules. See `V4_11_WAREHOUSE_STATEMENTS.md`. No database schema change; keep the existing Railway volume and data.
