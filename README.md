@@ -1,40 +1,42 @@
-# Hospital Warehouse IMS V4.8 — Shipment prices, authorization & departments
+# Hospital Warehouse IMS — Version 4.9
 
-This is the complete source for the **existing** one-warehouse Railway test application (Home, Login, Dashboard, FastAPI backend, SQLite, and Arabic-first bilingual UI). It is an **incremental replacement for V4.7**, not a new database or a second service.
+Arabic-first, bilingual, single-warehouse inventory testing application. Includes the existing Home, Login, Dashboard, FastAPI backend, SQLite database, user permissions, batch/lot-based stock, prices in Iraqi dinars/fils, 3 outgoing routes, 4 incoming routes, a permanent movement ledger, and administrator Backup & Restore.
 
-## New in V4.8
+**This is an incremental code update for your EXISTING private GitHub repository and Railway service, NOT a replacement database.**
 
-- **Incoming external transfers and outgoing external/pharmacy transfers:** Enter the **trusted pharmacist's name** as free text, including people who don't have staff accounts; additionally enter **رقم كتاب التخويل** (authorization letter number). Both are required for these transfers, recorded in movement history, and included in backups. Department issues and ordinary receipts do not require them.
-- **Received item lines:** Enter **دينار** and **فلس** for each incoming line, independently of the catalog reference price. A new receipt can have a different price than earlier receipts of the same product.
-- **Independent inventory lots:** One item may have many stored rows with different batch numbers, expiry dates, and unit prices. Stock is tracked by lot. Issuing a batch captures its stored lot price in movement history. Other lot prices don't change when the catalog price changes.
-- **Departments:** Adding or editing requires only **the department name**. A code is generated automatically for new departments as an internal database key; previous department codes remain intact but no longer appear in the form.
-- **Arabic and English:** Arabic remains the default. The light visual theme and the three outgoing / four incoming routes remain.
+## V4.9 changes
 
-See [V4_8_CHANGES.md](V4_8_CHANGES.md) for database details and test instructions.
+1. **تجهيز طلبية — outgoing item lines:** Product, **specific received lot / الوجبة**, lot expiry (automatically displayed), quantity, **دينار**, and **فلس**. The selectable lot determines the true batch/expiry and available balance. The outgoing unit price defaults to its received-lot price but may be changed **for that outgoing movement only**. Both the original receipt lot price and the outgoing historical price are preserved separately.
+2. **تعديلات المخزون:** The duplicate department return form is removed. Department returns are still available through **استلام الشحنات → إرجاع طلبية داخلية**. The audited inventory adjustments screen remains.
+3. **59 starter departments:** All names provided by the warehouse are preloaded once into any current database that has not received this V4.9 seed. Existing departments are not deleted or overwritten. Users can **add, rename or deactivate** departments. A one-time seed marker prevents a renamed default department from reappearing on subsequent restarts.
+4. **Department search:** A searchable dropdown with a search field at the **top of the open menu** is used when selecting departments for outgoing issues and incoming internal returns. The Departments management page has an additional search filter.
+5. Arabic remains the default. The approved light theme and all existing branches, books, authorization documents and permissions remain unchanged.
 
-## Deployment to the existing Railway app
+See `V4_9_CHANGES.md` and `department_catalog.py` for implementation details and the exact 59 department names.
 
-1. Export a backup of the current database through **Backup & Restore** (the download contains sensitive data and password hashes; keep it private).
-2. Confirm your existing Railway service has a persistent volume mounted at `/data`, and `WAREHOUSE_DATA_DIR=/data`.
-3. Extract this ZIP and replace the **source code** in your existing private GitHub repository. Do **not** upload or replace SQLite files, backups, your Railway volume, or secret variables.
-4. Redeploy the **same Railway service**, with one replica and worker.
-5. Open `https://your-app-domain/api/health` and confirm `"version":7,"release":"4.8.0"`.
-6. Check that previously saved items, batches, incoming/outgoing movements, and departments remain unchanged. Test a dummy receipt at different price/expiry, an external transfer with outside pharmacist, and adding a department by name.
+## Updating Railway safely
 
-The database migrates automatically when the new version starts. Older V4.7 data remains in the persistent SQLite database, and the new columns/index are added without erasing historic movements.
+1. Download an administrator backup from the running app's **Backup & Restore** page, and store the archive privately (it contains sensitive operational data and password hashes; it is not encrypted).
+2. Verify the same Railway service has its existing persistent volume mounted at `/data`, with `WAREHOUSE_DATA_DIR=/data`.
+3. Update **source files only** in the root of the existing private GitHub repository. Do not upload SQLite data files, database backups, or environment secrets to GitHub.
+4. Redeploy the **same** Railway service. Do not delete, replace, or detach the existing volume.
+5. Visit `https://YOUR-DOMAIN/api/health` and verify `"release":"4.10.0"` and `"version":7`.
+6. Check a pre-existing movement, a pre-existing department, the 59 preloaded department names, the searchable department picker, and an outgoing transaction using a test batch with two distinct receipt prices. Inspect its historical outgoing price.
 
-**Important historical data limitation:** Earlier receipt rows already recorded a movement price snapshot, which remains unchanged. Existing legacy batch balances are initialized with the item's last saved catalog price *where known*, because the old schema did not track balances separately by receipt price. That inferred price cannot recover any forgotten original purchase prices. New receipts are accurately differentiated after V4.8.
+**Database schema version remains 7.** The new departments are added non-destructively. V4.8 backups remain compatible.
 
-## Local testing
+## Local test
 
 ```bash
 pip install -r requirements.txt
-python test_v48_regression.py
+python test_v49_regression.py
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-Local test-only initial credentials are `enki` / `123`. **Do not deploy these credentials on the public internet.** The Railway app requires a secure admin bootstrap password stored privately in Railway variables; do not place credentials into GitHub.
+Local demonstration-only initial login is `enki` / `123`. **Never use that password on an internet-facing Railway service.** Public deployments require a strong admin bootstrap password stored privately in Railway variables; see `RAILWAY_SETUP.md`.
 
-Arabic interface strings: `static/locales/ar.json`.
+For Arabic wording edits, use `static/locales/ar.json`. Product/department names entered into the database are not translated automatically.
 
-This is an early collaborative warehouse **testing** build. Do not enter confidential hospital or patient data or depend on it for real clinical operations until security and operational validation are completed. The downloadable ZIP database backup is not encrypted.
+## Important operational limits
+
+This is still a multi-user **testing build**, not a validated clinical inventory system. Use fictitious stock while testing. The manual exported backups are unencrypted; keep them off public drives/chats. Implement production-grade access auditing, rate limits, encrypted off-site backups and restore drills before relying on this software for actual hospital operations.

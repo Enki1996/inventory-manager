@@ -83,3 +83,34 @@
 .ship-line.receive-priced .db-input,.ship-line.receive-priced .db-select{width:100%;min-width:0}
 @media(max-width:1200px){.ship-line.receive-priced{grid-template-columns:repeat(3,minmax(0,1fr))}.ship-line.receive-priced .db-field:first-child{grid-column:auto}}
 @media(max-width:700px){.ship-line.receive-priced{grid-template-columns:repeat(2,minmax(0,1fr))}.ship-line.receive-priced .db-field:first-child{grid-column:1/-1}}
+/* V4.9 — six-field outgoing lot rows with the same visual structure as receipts. */
+.ship-line.issue-detailed{grid-template-columns:minmax(180px,1.65fr) minmax(150px,1.35fr) minmax(133px,.95fr) minmax(75px,.6fr) minmax(95px,.7fr) minmax(85px,.6fr) 32px;align-items:end}
+.ship-line.issue-detailed .db-input,.ship-line.issue-detailed .db-select{min-width:0;width:100%}
+.ship-line.issue-detailed [data-issue-expiry]{background:#ecf7fa;color:#416b7e;cursor:default}
+@media(max-width:1350px){.ship-line.issue-detailed{grid-template-columns:repeat(3,minmax(0,1fr))}.ship-line.issue-detailed .db-field:first-child{grid-column:auto}}
+@media(max-width:700px){.ship-line.issue-detailed{grid-template-columns:repeat(2,minmax(0,1fr))}.ship-line.issue-detailed .db-field:first-child{grid-column:1/-1}}
+/* Department picker: search is the first focusable element in the dropdown menu. */
+.dept-picker{position:relative;min-width:0;isolation:isolate}
+.dept-trigger{display:flex;justify-content:space-between;align-items:center;text-align:start;gap:10px;min-height:42px;cursor:pointer}
+.dept-trigger>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dept-chevron{color:#07a3a2;flex-shrink:0}
+.dept-picker:has(.dept-popup:not([hidden])){z-index:16}
+.dept-popup{position:absolute;top:calc(100% + 5px);inset-inline:0;background:#fff;border:1px solid #b9d9e1;border-radius:13px;box-shadow:0 20px 40px rgba(20,76,101,.18);padding:9px;z-index:30;min-width:min(320px,80vw)}
+.dept-popup[hidden]{display:none!important}
+.dept-search{width:100%;margin-bottom:7px;background:#f4fbfc}
+.dept-option-list{overflow:auto;max-height:265px;display:grid;gap:3px;overscroll-behavior:contain}
+.dept-option{display:block;text-align:start;border:0;background:transparent;color:#25495c;padding:10px 9px;border-radius:9px;font-family:inherit;font-size:12px;line-height:1.4;cursor:pointer;white-space:normal}
+.dept-option:hover,.dept-option:focus-visible{background:#e9f7f8;color:#067e82;outline:1px solid #c4e6e9}
+.dept-option[aria-selected="true"]{background:#def5f4;color:#087f7c;font-weight:800}
+.dept-option[hidden],.dept-no-results[hidden]{display:none!important}
+.dept-no-results{text-align:center;font-size:11px;color:#7b95a4;padding:15px 8px}
+
+/* V4.10 — FEFO guidance and documented exception */
+.fefo-line-notice{grid-column:1/-1;font-size:12px;line-height:1.7;border:1px solid #c6e8e5;border-radius:9px;padding:9px 12px;background:#f1faf8;color:#22796c}
+.fefo-line-notice.warning{background:#fff9e9;border-color:#f4dcaa;color:#9d6622}
+.fefo-line-notice.danger{background:#fff0ed;border-color:#edc4bb;color:#a3463b}
+.fefo-line-notice.success{background:#e9f9f4;border-color:#c4e7d5;color:#247e5e}
+.fefo-pick{display:inline-block;padding:3px 9px;margin-inline-start:6px;border-radius:7px;border:1px solid #9e6b51;background:#fff;color:#8a483c;font-weight:750;cursor:pointer}
+.fefo-override{background:#fff6ef;border:1px solid #eecab4;border-radius:12px;padding:15px;margin:10px 0}
+.fefo-override .db-field{color:#9a4935}
+[data-fefo-summary]{margin-bottom:10px}

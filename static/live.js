@@ -1,17 +1,18 @@
-/* Live V4.8 bilingual warehouse prototype: all changes go through the server and SQLite database. */
+/* Live V4.10 bilingual warehouse prototype: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
 const E = value=>String(value??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
 const N = v=>Number(v||0).toLocaleString('en-US');
 const priceLabel=v=>{if(v==null)return '—';const d=N(Math.floor(Number(v)/1000)),f=String(Number(v)%1000).padStart(3,'0');return window.HWLang?.get()==='en'?`${d} IQD · ${f} fils`:`${d} دينار · ${f} فلس`;};
+const todayBaghdad=()=>{const p=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Baghdad',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(x=>[x.type,x.value]));return `${p.year}-${p.month}-${p.day}`};
 const fmtDate = str=>new Date(str).toLocaleString(window.HWLang?.get()==='ar'?'ar-IQ':'en-GB',{timeZone:'Asia/Baghdad',dateStyle:'medium',timeStyle:'short'});
 const D = str=>str?`<time class="localized-time" datetime="${E(str)}">${E(fmtDate(str))}</time>`:'—';
 const badge = (label,kind='neutral')=>`<span class="pill ${kind}">${E(label)}</span>`;
 const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E(title)}</strong><span class="muted-hint">${E(sub)}</span></div>`;
 let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,books:{},units:{},staff:[]}, toastTimer;
 let inlineNewItem=null; // Pending shipment line; kept intact while the item modal is open.
-const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Returns & Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
+const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
 const branchName=b=>BRANCHES.find(x=>x[0]===b)?.[1]||'Unassigned — admin classification needed';
@@ -74,8 +75,42 @@ async function refreshData(){
 }
 const selectOptions = (items,selected='',placeholder='Select one')=>`<option value="">${E(placeholder)}</option>`+items.map(o=>`<option value="${E(o.value)}" ${String(o.value)===String(selected)?'selected':''}>${E(o.label)}</option>`).join('');
 const itemOptions = ()=>selectOptions(cache.items.filter(x=>x.active&&inMyBranch(x.branch)).map(x=>({value:x.id,label:`${x.sku} · ${x.trade_name?x.trade_name+' / ':''}${x.name} (${x.unit})`})),'','Select product');
-const deptOptions = ()=>selectOptions(cache.departments.filter(x=>x.active).map(x=>({value:x.id,label:x.name})),'','Choose department');
-const batchOptions = (includeExpired=false)=>selectOptions(cache.batches.filter(x=>inMyBranch(x.branch)&&x.item_active&&x.on_hand>0&&(includeExpired||!x.expiry_date||x.expiry_date>=new Date().toISOString().slice(0,10))).map(x=>({value:x.id,label:`${x.item_name} · Batch ${x.batch_no} · ${N(x.on_hand)} ${x.unit} · Exp ${x.expiry_date||'N/A'} · ${priceLabel(x.unit_price_fils)}`})),'','Select batch');
+// Searchable dropdown with the search box INSIDE the expanded department menu.
+// The submitted value is always a real department ID; typed text alone cannot select a department.
+let deptPickerCounter=0;
+const departmentPicker=(label='Receiving hospital department')=>{
+ const uid=`department-list-${++deptPickerCounter}`;
+ const active=cache.departments.filter(x=>x.active);
+ return `<div class="db-field"><span>${E(label)}</span><div class="dept-picker" data-dept-picker>
+  <button type="button" class="db-select dept-trigger" data-dept-trigger aria-expanded="false" aria-haspopup="listbox" aria-controls="${uid}"><span data-dept-caption>Choose department</span><span class="dept-chevron" aria-hidden="true">▾</span></button>
+  <input type="hidden" name="department_id" data-dept-value value="">
+  <div class="dept-popup" data-dept-popup hidden>
+   <input class="db-input dept-search" data-dept-search type="search" placeholder="Search departments..." aria-label="Search departments" autocomplete="off">
+   <div id="${uid}" class="dept-option-list" data-dept-options role="listbox" aria-label="${E(label)}">${active.map(d=>`<button type="button" role="option" aria-selected="false" class="dept-option" data-dept-option="${d.id}" data-dept-name="${E(d.name)}">${E(d.name)}</button>`).join('')}</div>
+   <p class="dept-no-results" data-dept-empty hidden>No matching departments</p>
+  </div>
+ </div></div>`;
+};
+function closeDepartmentPicker(picker){if(!picker)return;const pop=picker.querySelector('[data-dept-popup]');if(pop)pop.hidden=true;picker.querySelector('[data-dept-trigger]')?.setAttribute('aria-expanded','false');}
+function openDepartmentPicker(picker){
+ document.querySelectorAll('[data-dept-picker]').forEach(other=>{if(other!==picker)closeDepartmentPicker(other)});
+ const pop=picker.querySelector('[data-dept-popup]');if(!pop)return;pop.hidden=false;
+ picker.querySelector('[data-dept-trigger]')?.setAttribute('aria-expanded','true');
+ const search=picker.querySelector('[data-dept-search]');search.value='';filterDeptPicker(picker);search.focus();
+}
+function filterDeptPicker(picker){
+ const q=normalizeItemSearch(picker.querySelector('[data-dept-search]')?.value||'');let visible=0;
+ picker.querySelectorAll('[data-dept-option]').forEach(btn=>{const yes=normalizeItemSearch(btn.dataset.deptName).includes(q);btn.hidden=!yes;if(yes)visible++});
+ picker.querySelector('[data-dept-empty]').hidden=visible!==0;
+}
+function selectDepartment(picker,option){
+ picker.querySelector('[data-dept-value]').value=option.dataset.deptOption;
+ picker.querySelector('[data-dept-caption]').textContent=option.dataset.deptName;
+ picker.querySelectorAll('[data-dept-option]').forEach(btn=>btn.setAttribute('aria-selected',String(btn===option)));
+ closeDepartmentPicker(picker);picker.querySelector('[data-dept-trigger]')?.focus();
+}
+
+const batchOptions = (includeExpired=false)=>selectOptions(cache.batches.filter(x=>inMyBranch(x.branch)&&x.item_active&&x.on_hand>0&&(includeExpired||!x.expiry_date||x.expiry_date>=todayBaghdad())).map(x=>({value:x.id,label:`${x.item_name} · Batch ${x.batch_no} · ${N(x.on_hand)} ${x.unit} · Exp ${x.expiry_date||'N/A'} · ${priceLabel(x.unit_price_fils)}`})),'','Select batch');
 const field=(label,input,help='')=>`<label class="db-field"><span>${E(label)}</span>${input}${help?`<small>${E(help)}</small>`:''}</label>`;
 const inp=(name,placeholder='',type='text',other='')=>`<input class="db-input" name="${name}" placeholder="${E(placeholder)}" type="${type}" ${other}>`;
 const head=(title,desc,actions='')=>`<div class="db-head"><div><span class="eyebrow">Central Warehouse / Live Workspace</span><h1>${E(title)}</h1><p>${E(desc)}</p></div>${actions?`<div class="db-actions">${actions}</div>`:''}</div>`;
@@ -117,16 +152,16 @@ function movementRows(movements){return movements.map(m=>{
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,m.kind==='OUT'?'blue':'neutral')}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`${E(l.item_name)} · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
+ return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,m.kind==='OUT'?'blue':'neutral')}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
 })}
 
-function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<new Date().toISOString().slice(0,10)?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
+function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
 function overview(){
  const s=cache.dashboard;
  const metrics=[['Registered items',s.items,'Products in catalog','package'],['Warehouse units',s.stock,'Total stock across all batches','packages'],['Active departments',s.departments,'Distribution destinations','building'],['Recorded movements',s.movements,'Permanent transaction log','history']];
  const kpis=`<div class="db-kpis">${metrics.map(([label,num,desc,icon])=>`<div class="db-kpi"><span class="name">${I(icon)} ${E(label)}</span><span class="num">${N(num)}</span><span class="desc">${E(desc)}</span></div>`).join('')}</div>`;
  const alerts=cache.items.filter(i=>i.active&&i.min_stock>0&&i.stock<i.min_stock);
- const exp=cache.batches.filter(b=>b.on_hand>0&&b.expiry_date&&b.expiry_date>=new Date().toISOString().slice(0,10)&&b.expiry_date<=new Date(Date.now()+60*864e5).toISOString().slice(0,10));
+ const exp=cache.batches.filter(b=>b.on_hand>0&&b.expiry_date&&b.expiry_date>=todayBaghdad()&&b.expiry_date<=new Date(Date.now()+60*864e5).toISOString().slice(0,10));
  return `<div class="db-decor">${head('Welcome back, '+user.full_name,'Your central warehouse is connected to the local database. Inventory and movements below update after every saved transaction.')}
  <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${can('department_write')?`<button class="db-btn secondary" data-new="dept">${I('building')} Add department</button>`:''}${can('movement_write')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button><button class="db-btn secondary" data-go="distribution">${I('outgoing')} Distribute stock</button>`:''}</div></div>
  ${user.role!=='admin'&&!user.branch?'<div class="db-alert"><strong>Warehouse branch not assigned.</strong> Ask your administrator to assign your account to one branch before managing stock.</div>':''}
@@ -135,7 +170,8 @@ function overview(){
  ${panel('Quick navigation',`<div class="db-actions"><button class="db-btn secondary" data-go="inventory">Inventory</button><button class="db-btn secondary" data-go="departments">Departments</button><button class="db-btn secondary" data-go="movements">Movement history</button></div>`,'dashboard')}</div></div>`
 }
 function inventory(){return `${head('Item inventory','Create products independently of stock receipts. Stock is then added to its matching batch through Receive Shipments.',can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} New item</button>`:'')}${panel('Product catalog',`<div class="db-note"><span>Three fixed branches · Medication, Medical Supplies, Surgical Instruments.</span> <span>Books are predefined for each branch; select the matching register.</span> ${user.role==='admin'?'<span>Administrators can classify unassigned legacy items.</span>':`<span>Your assigned branch:</span> <strong>${E(branchName(user.branch))}</strong>`}</div><div class="db-toolbar">${inp('filter','Search scientific, generic, common name, company or code...','search','id="itemFilter"')}<select class="db-select" id="itemBranchFilter"><option value="">All branches</option>${branchList('').replace('<option value="">Select a branch</option>','')}</select><select class="db-select" id="itemBookFilter">${filterBookOptions()}</select><span class="muted-hint">${cache.items.length} registered items</span></div><div id="itemResults">${table(inventoryColumns,itemRows(cache.items))}</div>`,'package')}`}
-function departments(){return `${head('Hospital departments','These are shipment destinations. This version does not manage their internal stock.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',table(['Department','Status','Actions'],departmentRows(cache.departments)),'building')}`}
+function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${table(['Department','Status','Actions'],departmentRows(cache.departments))}</div>`,'building')}`}
+function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=table(['Department','Status','Actions'],departmentRows(cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q))));}
 function batches(){return `${head('Batches and expiration','Stock quantity is recorded separately for every batch. Never issue expired lots.')}${panel('Batch register',table(['Product','Warehouse branch','Batch number','Expiration','Unit price (IQD)','Warehouse balance','Status'],batchRows(cache.batches)),'calendar')}`}
 function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Incoming</option><option value="OUT">Distributions</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
 // In shipment menus, an authorized item editor can create a missing catalog item without leaving the draft.
@@ -158,7 +194,106 @@ function prefillReceiptPrice(line){
  if(d)d.value=String(Math.floor(price/1000));
  if(f)f.value=String(price%1000);
 }
-const issueLine=includeExpired=>`<div class="ship-line issue" data-issue-line data-allow-expired="${includeExpired?'1':'0'}">${field('Select product batch',`<select class="db-select" data-key="batch_id" required>${batchOptions(includeExpired)}</select>${includeExpired?'':inlineItemButton('issue')}`)}${field('Quantity',`<input class="db-input" type="number" data-key="qty" min="1" step="1" required placeholder="0">`)}<button class="db-btn danger small" type="button" data-remove-line>×</button></div>`;
+// Outgoing issues: select a product THEN an exact received lot. The lot supplies
+// the authoritative batch number and expiry; the issue's dinar/fils snapshot may
+// be edited without mutating the original receipt lot price.
+const issueLine=(includeExpired=false)=>includeExpired
+ ? `<div class="ship-line issue legacy-issue" data-issue-line data-allow-expired="1">${field('Select product batch',`<select class="db-select" data-key="batch_id" required>${batchOptions(true)}</select>`)}${field('Quantity',`<input class="db-input" type="number" data-key="qty" min="1" step="1" required placeholder="0">`)}<button class="db-btn danger small" type="button" data-remove-line>×</button></div>`
+ : `<div class="ship-line issue-detailed" data-issue-line data-allow-expired="0">
+ ${field('Product',`<select class="db-select" data-key="item_id" data-issue-product required>${itemOptions()}</select>${inlineItemButton('issue')}`)}
+ ${field('Batch number / lot',`<select class="db-select" data-key="batch_id" data-issue-batch required><option value="">Choose product first</option></select>`)}
+ ${field('Expiry date',`<input type="date" class="db-input" data-issue-expiry readonly aria-label="Expiry date of selected lot">`)}
+ ${field('Quantity',`<input type="number" class="db-input" data-key="qty" data-issue-qty min="1" step="1" required placeholder="0">`)}
+ ${field('Price — دينار',`<input type="number" class="db-input" data-key="price_dinars" min="0" max="999999999" step="1" required placeholder="0">`)}
+ ${field('Price — فلس',`<input type="number" class="db-input" data-key="price_fils_component" min="0" max="999" step="1" required placeholder="0">`)}
+ <button class="db-btn danger small" type="button" data-remove-line aria-label="Remove product">×</button>
+ <div class="fefo-line-notice" data-fefo-notice role="status" aria-live="polite" hidden></div></div>`;
+// FEFO: first expiring, first out. Expired lots are not issueable.
+const fefoSort=(a,b)=>{
+ const ad=a.expiry_date||'9999-12-31',bd=b.expiry_date||'9999-12-31';
+ return ad.localeCompare(bd)||a.id-b.id;
+};
+const fefoAr=()=>window.HWLang?.get()!=='en';
+const fefoDateDays=(expiry)=>{
+ if(!expiry)return null;
+ const iso=t=>Date.UTC(...t.split('-').map(Number).map((v,i)=>i===1?v-1:v));
+ return Math.round((iso(expiry)-iso(todayBaghdad()))/86400000);
+};
+const eligibleLots=(itemId)=>cache.batches.filter(b=>b.item_id===itemId&&b.item_active&&inMyBranch(b.branch)&&b.on_hand>0&&(!b.expiry_date||b.expiry_date>=todayBaghdad())).sort(fefoSort);
+function fefoWarningDetails(form){
+ const lines=$$('[data-issue-line].issue-detailed',form),planned=new Map(),itemMap=new Map(),warnings=[];
+ for(const line of lines){
+  const lot=cache.batches.find(b=>b.id===Number(line.querySelector('[data-issue-batch]')?.value));
+  const qty=Number(line.querySelector('[data-issue-qty]')?.value||0);
+  if(lot&&qty>0){planned.set(lot.id,(planned.get(lot.id)||0)+qty);itemMap.set(lot.item_id,true);}
+ }
+ for(const id of itemMap.keys()){
+  const lots=eligibleLots(id);
+  for(const lot of lots){
+   if(!(planned.get(lot.id)>0))continue;
+   const earlier=lots.find(other=>(other.expiry_date||'9999-12-31')<(lot.expiry_date||'9999-12-31')&&other.on_hand>(planned.get(other.id)||0));
+   if(earlier)warnings.push({lot,earlier,remaining:earlier.on_hand-(planned.get(earlier.id)||0)});
+  }
+ }
+ return warnings;
+}
+function updateFefoNotices(form=$('#issueForm')){
+ if(!form)return;
+ const ar=fefoAr(),warnings=fefoWarningDetails(form);
+ const selectionWarnings=new Map(warnings.map(w=>[w.lot.id,w]));
+ for(const line of $$('[data-issue-line].issue-detailed',form)){
+  const iid=Number(line.querySelector('[data-issue-product]')?.value||0),lot=cache.batches.find(b=>b.id===Number(line.querySelector('[data-issue-batch]')?.value));
+  const message=line.querySelector('[data-fefo-notice]');if(!message)continue;
+  if(!iid){message.hidden=true;continue;}
+  const lots=eligibleLots(iid),best=lots[0],warning=lot&&selectionWarnings.get(lot.id);
+  message.hidden=false;message.className='fefo-line-notice';
+  if(!best){message.classList.add('danger');message.textContent=ar?'لا توجد وجبات متاحة للصرف لهذا الصنف.':'No available lot can be issued for this product.';continue;}
+  const shown=lot||best,days=fefoDateDays(shown.expiry_date);
+  const closest=ar?`الوجبة ${shown.batch_no} · الصلاحية ${shown.expiry_date||'غير مسجلة'} · الرصيد ${N(shown.on_hand)}`:
+   `Lot ${shown.batch_no} · expiry ${shown.expiry_date||'not recorded'} · available ${N(shown.on_hand)}`;
+  if(warning){
+   message.classList.add('danger');
+   message.innerHTML=`<strong>${ar?'تنبيه FEFO: توجد وجبة أقدم صلاحية لم تُصرف بالكامل.':'FEFO warning: an earlier-expiring lot still has stock.'}</strong> ${E(ar?'الأولوية: ':'Use first: ')}${E(warning.earlier.batch_no)} · ${E(warning.earlier.expiry_date||'—')} · ${N(warning.remaining)} ${E(ar?'متبقية':'remaining')}. <button type="button" class="fefo-pick" data-fefo-pick="${warning.earlier.id}">${ar?'اختيار الوجبة الأسبق':'Select earlier lot'}</button>`;
+  }else if(lot&&lot.id!==best.id&&(lot.expiry_date||'9999-12-31')>(best.expiry_date||'9999-12-31')&&!Number(line.querySelector('[data-issue-qty]')?.value||0)){
+   message.classList.add('warning');
+   message.innerHTML=`${E(ar?'تم اختيار وجبة أحدث صلاحية. يُنصح باختيار الأقرب انتهاءً أولاً: ':'A later-expiring lot is selected. Recommended first: ')}${E(best.batch_no)} · ${E(best.expiry_date||'—')} <button type="button" class="fefo-pick" data-fefo-pick="${best.id}">${ar?'اختيار الأقرب':'Select earliest'}</button>`;
+  }else if(!lot){message.classList.add('warning');message.textContent=(ar?'الأقرب انتهاءً أولاً (FEFO): ':'Earliest expiry first (FEFO): ')+closest;}
+  else if(days===null){message.classList.add('warning');message.textContent=ar?'تاريخ انتهاء هذه الوجبة غير مسجّل. تحقق من الصلاحية قبل الصرف.':'This lot has no recorded expiry. Verify the date before issue.';}
+  else if(days<=60){message.classList.add('warning');message.textContent=(ar?'⚠ أقرب وجبة للصرف؛ متبقي ':'⚠ Earliest lot to issue; ')+N(days)+(ar?' يوم. ':' days left. ')+closest;}
+  else{message.classList.add('success');message.textContent=(ar?'✓ صرف حسب أقرب تاريخ صلاحية: ':'✓ FEFO priority: ')+closest;}
+ }
+ const wrap=form.querySelector('[data-fefo-override-wrap]');
+ if(wrap){wrap.hidden=!warnings.length;const reason=wrap.querySelector('[name="fefo_override_reason"]');if(reason)reason.required=!!warnings.length;}
+ const top=form.querySelector('[data-fefo-summary]');
+ if(top){const urgent=cache.batches.filter(b=>b.on_hand>0&&b.item_active&&inMyBranch(b.branch)&&b.expiry_date&&b.expiry_date>=todayBaghdad()&&fefoDateDays(b.expiry_date)<=60);
+  top.textContent=ar?`قاعدة الصرف: الأقرب انتهاءً أولاً (FEFO). توجد ${urgent.length} وجبة صالحة تنتهي خلال ٦٠ يوماً في المخزن.`:
+  `Issue earliest-expiring usable lots first (FEFO). ${urgent.length} usable lot(s) expire within 60 days.`;
+ }
+}
+function syncIssueProduct(line, preferredBatch=null){
+ if(!line||!line.matches('.issue-detailed'))return;
+ const iid=Number(line.querySelector('[data-issue-product]')?.value||0);
+ const opts=eligibleLots(iid);
+ const sel=line.querySelector('[data-issue-batch]'),old=preferredBatch==null?Number(sel.value):Number(preferredBatch);
+ sel.innerHTML=selectOptions(opts.map((b,i)=>{const days=fefoDateDays(b.expiry_date);
+  const mark=i===0?'★ FEFO · ':'';
+  const near=days!==null&&days<=60?'⚠ ':'';
+  return {value:b.id,label:`${mark}${near}${b.batch_no} · Exp ${b.expiry_date||'unknown'} · ${N(b.on_hand)} ${b.unit} · ${priceLabel(b.unit_price_fils)}`};
+ }),'','Select received lot');
+ sel.value=opts.some(b=>b.id===old)?String(old):opts.length?String(opts[0].id):'';
+ syncIssueBatch(line);window.HWLang?.apply();
+}
+function syncIssueBatch(line){
+ if(!line||!line.matches('.issue-detailed'))return;
+ const batch=cache.batches.find(b=>b.id===Number(line.querySelector('[data-issue-batch]')?.value));
+ const expiry=line.querySelector('[data-issue-expiry]');if(expiry)expiry.value=batch?.expiry_date||'';
+ const qty=line.querySelector('[data-issue-qty]');if(qty){qty.max=batch?.on_hand||'';if(batch&&Number(qty.value)>batch.on_hand)qty.value=String(batch.on_hand);}
+ const price=batch?.unit_price_fils;
+ const d=line.querySelector('[data-key="price_dinars"]'),f=line.querySelector('[data-key="price_fils_component"]');
+ if(d)d.value=price==null?'':String(Math.floor(price/1000));
+ if(f)f.value=price==null?'':String(price%1000);
+ updateFefoNotices();
+}
 // V4.7 — explicit 4-in / 3-out shipment route selectors.
 function shipmentChoice(name,value,title,desc,checked=false){return `<label class="dest-choice-option"><input type="radio" name="${name}" value="${value}" ${checked?'checked':''}><span><strong>${E(title)}</strong><small>${E(desc)}</small></span></label>`;}
 const routeField=(selector,content)=>`<div class="dest-fields" data-${selector}>${content}</div>`;
@@ -173,7 +308,7 @@ ${shipmentChoice('route','internal_return','Internal department return','Materia
 ${routeField('in-pharmacy',field('Received from',`<input class="db-input" value="قسم الصيدلة" readonly>`))}
 ${routeField('in-purchase',field('Drugstore / distributor name',inp('source','Supplier or distributor','text','maxlength="180"')))}
 ${routeField('in-external',field('Sending hospital / external sector',inp('source','Hospital / organization name','text','maxlength="180"')))}
-${routeField('in-return',field('Returning hospital department',`<select class="db-select" name="department_id">${deptOptions()}</select>`))}
+${routeField('in-return',departmentPicker('Returning hospital department'))}
 ${routeField('in-ref',field('Receipt / order paper number',inp('paper_ref','Paper reference','text','maxlength="80" required')))}
 ${routeField('in-dispatch',field('Warehouse return receipt number',inp('dispatch_ref','Our return receipt number','text','maxlength="80"')))}
 ${routeField('in-pharmacist',field('Trusted pharmacist name',inp('trusted_pharmacist_name','Full name of authorized pharmacist','text','maxlength="160"')))}
@@ -208,7 +343,7 @@ ${shipmentChoice('route','department_issue','Hospital departments','Issue items 
 ${shipmentChoice('route','external_transfer_out','External transfers','Send stock to another hospital or sector')}
 ${shipmentChoice('route','pharmacy_transfer_out','Transfer to Pharmacy Department','Fixed destination: Pharmacy Department')}
 </div><div class="db-grid">
-${routeField('out-department',field('Receiving hospital department',`<select name="department_id" class="db-select">${deptOptions()}</select>`))}
+${routeField('out-department',departmentPicker('Receiving hospital department'))}
 ${routeField('out-external',field('Transfer destination name',inp('external_destination','Hospital / organization name','text','maxlength="180"')))}
 ${routeField('out-pharmacy',field('Transfer destination',`<input class="db-input" value="قسم الصيدلة" readonly>`))}
 ${routeField('out-pharmacist',field('Trusted pharmacist name',inp('trusted_pharmacist_name','Full name of authorized pharmacist','text','maxlength="160"')))}
@@ -217,7 +352,11 @@ ${routeField('out-ref',field('Order paper number',inp('paper_ref','Order / trans
 ${routeField('out-dispatch',field('Our dispatch paper number',inp('dispatch_ref','Dispatch paper number','text','maxlength="80" required')))}
 ${routeField('out-emergency',`<label class="emergency-check"><input type="checkbox" name="emergency_pending" value="1"><span><strong>Emergency issue — paperwork will be completed later</strong><small>تجهيز طارئ بدون أرقام أوراق حالياً؛ يجب إكمال رقم الطلبية ورقم ورقة التجهيز لاحقاً</small></span></label>`)}
 ${field('Notes (optional)',`<textarea name="notes" class="db-textarea" placeholder="Transfer / emergency details"></textarea>`)}
-</div><h3 class="shipment-lines-title">Products and available batches</h3><div id="issueLines">${issueLine(false)}</div>
+</div><h3 class="shipment-lines-title">Products and available batches</h3>
+<div class="db-help" data-fefo-summary role="status">FEFO: Earliest expiring usable lot is recommended first.</div>
+<div id="issueLines">${issueLine(false)}</div>
+<div class="fefo-override" data-fefo-override-wrap hidden>${field('FEFO exception reason (required when issuing a later-expiring lot)',`<textarea class="db-textarea" name="fefo_override_reason" maxlength="250" placeholder="Explain why earlier-expiring available stock is not being issued"></textarea>`)}</div>
+<p class="db-help">Lots are sorted by earliest usable expiry. A later-expiring lot requires a recorded exception reason if an earlier-expiring lot still has stock. Expired lots cannot be issued.</p>
 <div class="db-actions"><button type="button" class="db-btn secondary" data-add="issue">+ Add another batch</button><button type="submit" class="db-btn">${I('outgoing')} Save outgoing shipment</button></div></form>
 <div class="db-note warn" style="margin-top:14px">Emergency paperwork is restricted to department distributions. It does not bypass stock, branch, batch, or expiry checks.</div>`,'outgoing')}
 ${pending.length?panel('Emergency shipments awaiting documents',table(['Movement','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(pending)),'history'):''}`}
@@ -246,7 +385,8 @@ function syncOutgoingDestination(form){
  window.HWLang?.apply();
 }
 
-function returns(){return `${head('Returns and stock adjustments','Return unused items to the central warehouse or perform manager-authorized balance corrections with an audit record.')}${panel('Record department return',`<form id="returnForm" class="db-form"><div class="db-grid">${field('Return paper reference',inp('paper_ref','e.g. RET-2026-0034','text','required'))}${field('Returning department',`<select class="db-select" name="department_id" required>${deptOptions()}</select>`)}${field('Warehouse return receipt number',inp('dispatch_ref','e.g. RET-IN-2026-005','text','required'))}${field('Original requisition number (notes)',inp('notes','e.g. REQ-2026-0185','text'))}</div><div id="returnLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn secondary" type="button" data-add="return">+ Add item</button><button class="db-btn" type="submit">${I('return')} Record return</button></div></form>`,'return')}${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):''}`}
+function returns(){return `${head('Stock adjustments','Department returns are recorded only under Receive Shipments → Internal department return. This tab is for audited stocktaking corrections.')}
+${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):msg('Read-only','Only managers and administrators with branch permissions can adjust stock.')}`}
 function users(){if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');const rows=cache.users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td>${x.must_change_password?'Temporary':'Updated'}</td><td>${x.id!==user.id?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:'Current account'}</td></tr>`);
 return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',table(['Username / name','Role','Assigned branch','Status','Password','Actions'],rows),'users')}`}
 function backup(){return `${head('Database backup and restore','Administrators can download a portable complete snapshot or upload a previously exported file. Account password hashes are included, but active login sessions are excluded.')}
@@ -262,7 +402,7 @@ const pages={overview,inventory,departments,batches,movements,receiving,distribu
 function showPage(next){
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup')))next='overview';
  view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
- $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='distribution')syncOutgoingDestination($('#issueForm'));if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
+ $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
  if(next==='settings'&&can('item_write'))loadAudit();
  window.scrollTo({top:0,behavior:'instant'});
 }
@@ -299,7 +439,7 @@ function editItem(it=null){
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.8</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.9</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
  window.HWLang?.apply();
 }
@@ -325,12 +465,11 @@ function syncItemBranchFields(form, previousBook='', previousUnit=''){
  window.HWLang?.apply();
 }
 function reloadShipmentDropdowns(){
- $$('[data-receive-line] select[data-key="item_id"]').forEach(sel=>{
-  const selected=sel.value;sel.innerHTML=itemOptions();sel.value=selected;
- });
- $$('[data-issue-line] select[data-key="batch_id"]').forEach(sel=>{
-  const selected=sel.value;const expired=sel.closest('[data-issue-line]')?.dataset.allowExpired==='1';
-  sel.innerHTML=batchOptions(expired);sel.value=selected;
+ $$('[data-receive-line] select[data-key="item_id"]').forEach(sel=>{const saved=sel.value;sel.innerHTML=itemOptions();sel.value=saved;});
+ $$('[data-issue-line]').forEach(line=>{
+  const item= line.querySelector('[data-issue-product]');
+  if(item){const selected=item.value;item.innerHTML=itemOptions();item.value=selected;syncIssueProduct(line);}
+  else{const sel=line.querySelector('[data-key="batch_id"]');const saved=sel.value;sel.innerHTML=batchOptions(true);sel.value=saved;}
  });
  window.HWLang?.apply();
 }
@@ -381,7 +520,7 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
   modalClose();await refreshData();reloadShipmentDropdowns();
   if(ctx?.line?.isConnected){
    const b=cache.batches.find(x=>x.item_id===Number(id)&&x.batch_no===d.batch_no&&x.expiry_date===d.expiry_date&&x.unit_price_fils===Number(d.price_dinars)*1000+Number(d.price_fils_component)&&x.on_hand>0);
-   if(b){const select=ctx.line.querySelector('select[data-key="batch_id"]');if(select)select.value=String(b.id)}
+   if(b){const product=ctx.line.querySelector('[data-issue-product]');if(product){product.value=String(id);syncIssueProduct(ctx.line,b.id)}else{const select=ctx.line.querySelector('select[data-key="batch_id"]');if(select)select.value=String(b.id)}}
   }
   inlineNewItem=null;
   toast(`Incoming receipt ${r.code} saved. New batch selected for distribution.`);
@@ -403,6 +542,7 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
    prefillReceiptPrice(ctx.line);
    inlineNewItem=null;toast('Item registered. Add its received quantity to the shipment.');
   }else if(ctx.mode==='issue'){
+   const product=ctx.line.querySelector('[data-issue-product]');if(product){product.value=String(createdItem.id);syncIssueProduct(ctx.line);}
    quickReceiptForNewItem(createdItem.id,ctx);
    toast('Item registered with zero stock. Record an incoming receipt to issue it.');
   }
@@ -414,10 +554,11 @@ async function postShipment(kind,form,lines){
  const resolved=kind==='IN'&&route==='internal_return'?'RETURN':kind;
  const payload={kind:resolved,route,paper_ref:obj.paper_ref||'',dispatch_ref:obj.dispatch_ref||'',
   source:obj.source||'',notes:obj.notes||'',lines};
- if(resolved==='RETURN')payload.department_id=Number(obj.department_id);
+ if(resolved==='RETURN'){payload.department_id=Number(obj.department_id);if(!payload.department_id)throw Error('Choose a department from the list.')}
  if(resolved==='OUT'){
+  payload.fefo_override_reason=obj.fefo_override_reason||'';
   payload.emergency_pending=obj.emergency_pending==='1';
-  if(route==='department_issue')payload.department_id=Number(obj.department_id);
+  if(route==='department_issue'){payload.department_id=Number(obj.department_id);if(!payload.department_id)throw Error('Choose a department from the list.')}
   if(route==='external_transfer_out')payload.external_destination=obj.external_destination||'';
   if(route!=='department_issue'){payload.trusted_pharmacist_name=obj.trusted_pharmacist_name||'';payload.authorization_ref=obj.authorization_ref||'';}
  }
@@ -441,6 +582,9 @@ function completeMovementPapers(m){
 }
 document.addEventListener('click',async e=>{
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
+ const trigger=e.target.closest('[data-dept-trigger]');if(trigger){const picker=trigger.closest('[data-dept-picker]');if(picker.querySelector('[data-dept-popup]').hidden)openDepartmentPicker(picker);else closeDepartmentPicker(picker);return}
+ const option=e.target.closest('[data-dept-option]');if(option){selectDepartment(option.closest('[data-dept-picker]'),option);return}
+ if(!e.target.closest('[data-dept-picker]'))document.querySelectorAll('[data-dept-picker]').forEach(closeDepartmentPicker);
  const pending=e.target.closest('[data-complete-paperwork]');if(pending){completeMovementPapers(cache.movements.find(m=>m.id===Number(pending.dataset.completePaperwork)));return}
  const inline=e.target.closest('[data-inline-item]');
  if(inline){inlineNewItem={mode:inline.dataset.inlineItem,line:inline.closest('.ship-line')};editItem();return}
@@ -450,18 +594,18 @@ document.addEventListener('click',async e=>{
  const uu=e.target.closest('[data-edit-user]');if(uu){editUser(cache.users.find(x=>x.id===Number(uu.dataset.editUser)));return}
  const reset=e.target.closest('[data-reset-user]');if(reset){resetUser(cache.users.find(x=>x.id===Number(reset.dataset.resetUser)));return}
  if(e.target.closest('[data-close-modal]')){if($('#entityForm')?.dataset.entity?.startsWith('quickreceipt:'))toast('Item saved, but it cannot be issued until incoming stock is recorded.','error');modalClose();inlineNewItem=null;return}
- if(e.target.closest('[data-remove-line]')){const line=e.target.closest('.ship-line');const parent=line.parentElement;if(parent.children.length>1)line.remove();else toast('At least one line is required','error');return}
- const add=e.target.closest('[data-add]');if(add){const type=add.dataset.add;if(type==='receive'){$('#receiptLines').insertAdjacentHTML('beforeend',$('#receiptLines').dataset.returnMode==='1'?issueLine(true):receiveLine());}else $(`#${type==='issue'?'issueLines':type==='return'?'returnLines':'adjustLines'}`).insertAdjacentHTML('beforeend',issueLine(type!=='issue'));return}
+ const priority=e.target.closest('[data-fefo-pick]');if(priority){const line=priority.closest('[data-issue-line]');const select=line?.querySelector('[data-issue-batch]');if(select){select.value=priority.dataset.fefoPick;syncIssueBatch(line);}return;}
+ if(e.target.closest('[data-remove-line]')){const line=e.target.closest('.ship-line');const parent=line.parentElement;if(parent.children.length>1)line.remove();else toast('At least one line is required','error');updateFefoNotices();return}
+ const add=e.target.closest('[data-add]');if(add){const type=add.dataset.add;if(type==='receive'){$('#receiptLines').insertAdjacentHTML('beforeend',$('#receiptLines').dataset.returnMode==='1'?issueLine(true):receiveLine());}else $(`#${type==='issue'?'issueLines':'adjustLines'}`).insertAdjacentHTML('beforeend',issueLine(type!=='issue'));return}
  if(e.target.closest('#downloadBackup')){downloadBackup();return}
 });
 document.addEventListener('submit',async e=>{
- const form=e.target;if(!['entityForm','receiveForm','issueForm','returnForm','adjustForm','passwordForm','restoreForm'].includes(form.id))return;
+ const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','restoreForm'].includes(form.id))return;
  e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
  try{
   if(form.id==='entityForm')await submitEntity(form);
   if(form.id==='receiveForm')await postShipment('IN',form,extractLines($('#receiptLines'),$('#receiptLines').dataset.returnMode==='1'?'issue':'receive'));
   if(form.id==='issueForm')await postShipment('OUT',form,extractLines($('#issueLines'),'issue'));
-  if(form.id==='returnForm')await postShipment('RETURN',form,extractLines($('#returnLines'),'issue'));
   if(form.id==='adjustForm')await postShipment(new FormData(form).get('kind'),form,extractLines($('#adjustLines'),'issue'));
   if(form.id==='passwordForm'){await api('/api/change-password',{method:'POST',data:Object.fromEntries(new FormData(form).entries())});user.must_change_password=false;form.reset();toast('Password updated and other sessions revoked')}
   if(form.id==='restoreForm'){
@@ -475,8 +619,13 @@ document.addEventListener('submit',async e=>{
  finally{if(document.body.contains(button))button.disabled=false}
 });
 document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInventory();
- if(e.target.id==='movementFilter')filterMovements()});
+ if(e.target.id==='movementFilter')filterMovements();
+ if(e.target.id==='departmentFilter')filterDepartmentTable();
+ if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
+ if(e.target.matches('[data-dept-search]'))filterDeptPicker(e.target.closest('[data-dept-picker]'));});
 document.addEventListener('change',e=>{
+ if(e.target.matches('[data-issue-product]'))syncIssueProduct(e.target.closest('[data-issue-line]'));
+ if(e.target.matches('[data-issue-batch]'))syncIssueBatch(e.target.closest('[data-issue-line]'));
  if(e.target.id==='movementType')filterMovements();
  if(e.target.id==='itemBranchFilter') { const filter=$('#itemBookFilter');if(filter){filter.innerHTML=filterBookOptions(e.target.value);filter.value=''}filterInventory(); }
  if(e.target.id==='itemBookFilter')filterInventory();
@@ -503,7 +652,19 @@ $('#logoutButton').addEventListener('click',async()=>{try{await api('/api/logout
 $('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){route('inventory');$('#itemFilter').value=e.target.value;$('#itemFilter').dispatchEvent(new Event('input',{bubbles:true}))}});
 $('#entityModal').addEventListener('click',e=>{if(e.target.id==='entityModal')modalClose()});
 window.addEventListener('hashchange',()=>{if(user)showPage(location.hash.slice(1))});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
+document.addEventListener('keydown',e=>{
+ const search=e.target.closest('[data-dept-search]');
+ if(search){const picker=search.closest('[data-dept-picker]');
+  if(e.key==='Escape'){closeDepartmentPicker(picker);picker.querySelector('[data-dept-trigger]').focus();e.preventDefault();return;}
+  if(e.key==='ArrowDown'){const first=[...picker.querySelectorAll('[data-dept-option]')].find(el=>!el.hidden);if(first){first.focus();e.preventDefault();return;}}
+  if(e.key==='Enter'){const matches=[...picker.querySelectorAll('[data-dept-option]')].filter(el=>!el.hidden);if(matches.length===1){selectDepartment(picker,matches[0]);e.preventDefault();return;}e.preventDefault();}
+ }
+ const option=e.target.closest('[data-dept-option]');if(option){const picker=option.closest('[data-dept-picker]');
+  if(e.key==='Escape'){closeDepartmentPicker(picker);picker.querySelector('[data-dept-trigger]').focus();e.preventDefault();return;}
+  if(e.key==='Enter'||e.key===' '){selectDepartment(picker,option);e.preventDefault();return;}
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){const matches=[...picker.querySelectorAll('[data-dept-option]')].filter(el=>!el.hidden);const i=matches.indexOf(option);matches[Math.max(0,Math.min(matches.length-1,i+(e.key==='ArrowDown'?1:-1)))]?.focus();e.preventDefault();return;}
+ }
+ if(e.key==='Escape'){modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
 (async function boot(){try{
  user=await api('/api/me');csrf=user.csrf;
  $('#userName').textContent=user.full_name;$('#userRole').textContent=user.role[0].toUpperCase()+user.role.slice(1);
@@ -513,4 +674,4 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){modalClose();inline
  await refreshData();showPage(location.hash.slice(1)||'overview');
 }catch(e){$('#dashboardView').innerHTML=msg('Database unavailable',e.message);toast(e.message,'error')}})();
 
-window.addEventListener('warehouse:languagechange',()=>{document.querySelectorAll('time.localized-time[datetime]').forEach(el=>{el.textContent=fmtDate(el.getAttribute('datetime'))});if(view==='inventory')filterInventory()});
+window.addEventListener('warehouse:languagechange',()=>{document.querySelectorAll('time.localized-time[datetime]').forEach(el=>{el.textContent=fmtDate(el.getAttribute('datetime'))});if(view==='inventory')filterInventory();if(view==='distribution')updateFefoNotices()});

@@ -24,6 +24,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 from book_catalog import BOOKS_BY_BRANCH, valid_book
 from unit_catalog import UNITS_BY_BRANCH, valid_unit
+from department_catalog import DEFAULT_DEPARTMENTS
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -49,7 +50,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 7
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.8.0'
+APP_RELEASE = '4.10.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -353,6 +354,25 @@ def price_from_fields(d):
     fils = integer(d, 'price_fils_component', 0, 999)
     return dinars * 1000 + fils
 
+def seed_default_departments(c: sqlite3.Connection):
+    """One-time, additive seed. Never recreate a department the user renamed."""
+    flag = 'starter_departments_v49_done'
+    if c.execute('SELECT 1 FROM app_meta WHERE key=?', (flag,)).fetchone():
+        return
+    added = 0
+    for name in DEFAULT_DEPARTMENTS:
+        if c.execute('SELECT 1 FROM departments WHERE name=? COLLATE NOCASE', (name,)).fetchone():
+            continue
+        temp_code = 'SEED-' + secrets.token_hex(8).upper()
+        cur = c.execute('INSERT INTO departments(code,name,created_at) VALUES(?,?,?)', (temp_code, name, now()))
+        c.execute('UPDATE departments SET code=? WHERE id=?', (f'DEP-{cur.lastrowid:06d}', cur.lastrowid))
+        added += 1
+    c.execute('INSERT INTO app_meta(key,value) VALUES(?,?)', (flag, str(added)))
+    if added:
+        c.execute('INSERT INTO audit_log(user_id,action,detail,created_at) VALUES(NULL,?,?,?)',
+                  ('DEPARTMENTS_SEEDED', json.dumps({'number_added': added, 'release': APP_RELEASE}, ensure_ascii=False), now()))
+
+
 def init_db():
     with db() as c:
         c.executescript('''
@@ -452,6 +472,7 @@ def init_db():
         migrate_outgoing_and_price(c)
         migrate_shipment_routes(c)
         migrate_per_receipt_pricing_and_transfer_authorization(c)
+        seed_default_departments(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
             old = c.execute("SELECT password_hash FROM users WHERE username='enki'").fetchone()
@@ -832,6 +853,53 @@ def movement_code(kind, mid):
     return {'IN':'IN','OUT':'OUT','RETURN':'RET','ADJUST_PLUS':'ADJ','ADJUST_MINUS':'ADJ'}[kind] + f'-{mid:06d}'
 
 
+
+def fefo_deviations(c: sqlite3.Connection, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Detect outgoing lots chosen while earlier-expiring usable stock is still available.
+
+    All lines of the shipment are considered together: it is valid to issue from
+    a later lot after the same outgoing document consumes every earlier lot.
+    Equal-expiry lots are interchangeable; unknown-expiry lots rank last.
+    """
+    from collections import defaultdict
+    chosen: dict[int, int] = defaultdict(int)
+    item_ids: set[int] = set()
+    today = dt.datetime.now(ZoneInfo('Asia/Baghdad')).date().isoformat()
+    for line in lines:
+        bid = integer(line, 'batch_id', 1)
+        qty = integer(line, 'qty', 1, 100_000_000)
+        batch = c.execute('SELECT item_id FROM batches WHERE id=?', (bid,)).fetchone()
+        if not batch:
+            err(422, 'Selected batch does not exist')
+        chosen[bid] += qty
+        item_ids.add(batch['item_id'])
+    deviations = []
+    for item_id in item_ids:
+        lots = [dict(row) for row in c.execute("""SELECT b.id,b.batch_no,b.expiry_date,b.on_hand
+            FROM batches b JOIN items i ON i.id=b.item_id
+            WHERE b.item_id=? AND b.on_hand>0 AND i.active=1
+              AND (b.expiry_date IS NULL OR b.expiry_date>=?)
+            ORDER BY CASE WHEN b.expiry_date IS NULL THEN 1 ELSE 0 END,
+                     b.expiry_date, b.id""", (item_id, today))]
+        for selected in lots:
+            if chosen.get(selected['id'], 0) <= 0:
+                continue
+            selected_date = selected['expiry_date'] or '9999-12-31'
+            earlier = next((other for other in lots
+                            if (other['expiry_date'] or '9999-12-31') < selected_date
+                            and other['on_hand'] > chosen.get(other['id'], 0)), None)
+            if earlier is not None:
+                deviations.append({
+                    'item_id': item_id,
+                    'selected_batch_id': selected['id'],
+                    'selected_batch_no': selected['batch_no'],
+                    'earlier_batch_id': earlier['id'],
+                    'earlier_batch_no': earlier['batch_no'],
+                    'earlier_expiry': earlier['expiry_date'],
+                    'earlier_remaining': earlier['on_hand'] - chosen.get(earlier['id'], 0),
+                })
+    return deviations
+
 @app.post('/api/movements')
 async def create_movement(request: Request):
     u = get_user(request, require_csrf=True)
@@ -903,6 +971,7 @@ async def create_movement(request: Request):
     dispatch_required = (kind == 'RETURN' or (kind == 'OUT' and route == 'department_issue')) and not emergency
     dispatch_ref = validated_text(d, 'dispatch_ref', required=dispatch_required, max_len=80)
     notes = validated_text(d, 'notes', required=False, max_len=500)
+    fefo_override_reason = validated_text(d, 'fefo_override_reason', required=False, max_len=250) if kind == 'OUT' else ''
     lines = d.get('lines')
     if not isinstance(lines, list) or not 1 <= len(lines) <= 50:
         err(422, 'Provide 1 to 50 shipment line items')
@@ -911,6 +980,15 @@ async def create_movement(request: Request):
     with db() as c:
         if department_id and not c.execute('SELECT 1 FROM departments WHERE id=? AND active=1', (department_id,)).fetchone():
             err(422, 'Choose an active hospital department')
+        fefo_warnings = fefo_deviations(c, lines) if kind == 'OUT' else []
+        if fefo_warnings and not fefo_override_reason:
+            first = fefo_warnings[0]
+            err(409, f"FEFO: Earlier-expiring batch {first['earlier_batch_no']} "
+                     f"(expiry {first['earlier_expiry'] or 'unknown'}) still has "
+                     f"{first['earlier_remaining']} unit(s) available. "
+                     'Select it first, or enter a documented FEFO override reason.')
+        if fefo_warnings:
+            notes = (notes + '\n' if notes else '') + 'FEFO override: ' + fefo_override_reason
         created = c.execute('''INSERT INTO movements(
                           code,kind,paper_ref,department_id,source,notes,destination_type,
                           external_destination,dispatch_ref,route,trusted_pharmacist_id,
@@ -923,6 +1001,7 @@ async def create_movement(request: Request):
         code = movement_code(kind, mid)
         c.execute('UPDATE movements SET code=? WHERE id=?', (code,mid))
         direction = 1 if kind in ('IN','RETURN','ADJUST_PLUS') else -1
+        outgoing_price_overrides = 0
         for line in lines:
             qty = integer(line,'qty',1,100_000_000)
             if kind == 'IN':
@@ -945,12 +1024,17 @@ async def create_movement(request: Request):
                     (iid,batchno,exp,now(),received_price)).lastrowid
             else:
                 batch_id = integer(line,'batch_id',1)
-                batch = c.execute('''SELECT b.id,b.expiry_date,i.branch,i.active item_active
+                batch = c.execute('''SELECT b.id,b.expiry_date,b.item_id,b.batch_no,b.unit_price_fils,
+                                          i.branch,i.active item_active
                                    FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?''',
                                   (batch_id,)).fetchone()
                 if not batch or not batch['item_active']:
                     err(422,'Batch not found or product is inactive')
                 restrict_branch(u, batch['branch'])
+                # If the outgoing UI sends a catalog product, it must match the
+                # exact selected lot. Never let mismatched product/lot pairs pass.
+                if kind == 'OUT' and line.get('item_id') not in (None, '') and integer(line, 'item_id', 1) != batch['item_id']:
+                    err(422, 'Selected product does not match the selected stock lot')
                 if kind == 'OUT' and batch['expiry_date'] and batch['expiry_date'] < dt.datetime.now(ZoneInfo('Asia/Baghdad')).date().isoformat():
                     err(409, 'Cannot issue expired stock')
             if direction > 0:
@@ -960,7 +1044,16 @@ async def create_movement(request: Request):
                               (qty,batch_id,qty))
                 if r.rowcount != 1:
                     err(409, 'Insufficient stock in the selected batch. Shipment not saved.')
-            unit_price = c.execute('SELECT unit_price_fils FROM batches WHERE id=?', (batch_id,)).fetchone()['unit_price_fils']
+            original_price = c.execute('SELECT unit_price_fils FROM batches WHERE id=?', (batch_id,)).fetchone()['unit_price_fils']
+            unit_price = original_price
+            # A shipment may explicitly value the outgoing units at a different
+            # price. Snapshot it on the movement line, NEVER on the received lot.
+            if kind == 'OUT' and ('price_dinars' in line or 'price_fils_component' in line):
+                if 'price_dinars' not in line or 'price_fils_component' not in line:
+                    err(422, 'Provide both dinar and fils components for outgoing unit price')
+                unit_price = price_from_fields(line)
+                if unit_price != original_price:
+                    outgoing_price_overrides += 1
             c.execute('INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils) VALUES (?,?,?,?,?)',
                       (mid,batch_id,qty,direction,unit_price))
         audit(c,u['id'],'MOVEMENT_CREATED',{
@@ -968,8 +1061,11 @@ async def create_movement(request: Request):
             'dispatch_ref':dispatch_ref,'department_id':department_id,'source':source,
             'destination':external_destination,'trusted_pharmacist_name':pharmacist_name,
             'authorization_ref':authorization_ref,
-            'emergency_pending':emergency,'line_count':len(lines)})
-    return {'ok':True,'code':code,'id':mid,'paperwork_pending':emergency}
+            'emergency_pending':emergency,'line_count':len(lines),
+            'outgoing_price_overrides':outgoing_price_overrides,
+            'fefo_deviations':fefo_warnings,'fefo_override_reason':fefo_override_reason if fefo_warnings else ''})
+    return {'ok':True,'code':code,'id':mid,'paperwork_pending':emergency,
+            'fefo_override':bool(fefo_warnings)}
 
 
 @app.patch('/api/movements/{movement_id}/paperwork')
@@ -1232,6 +1328,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 movement_cols = {r[1] for r in verify.execute('PRAGMA table_info(movements)')}
                 if 'unit_price_fils' not in batch_cols or not {'trusted_pharmacist_name','authorization_ref'}.issubset(movement_cols):
                     err(422, 'Backup declares V7 but is missing priced lots or transfer authorization')
+            seed_default_departments(verify)  # Older backups gain starter departments without deleting user records.
             verify.commit()
         except sqlite3.DatabaseError:
             err(422,'Invalid SQLite backup contents')
