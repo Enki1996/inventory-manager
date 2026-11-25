@@ -50,3 +50,29 @@
 .item-dialog .item-form-grid .db-textarea{min-height:110px}
 .form-version{vertical-align:middle;display:inline-flex;font-size:10px;font-weight:800;color:#07878c;background:#eaf9f8;border:1px solid #bfe8e5;border-radius:12px;padding:4px 9px;margin-inline-start:9px}
 @media(max-width:700px){.item-dialog .item-form-grid>.db-grid{grid-template-columns:1fr}}
+
+
+/* V4.6 — outgoing destination selection + inline item creation; light UI preserved. */
+.dest-choice{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.dest-choice-option{display:flex;align-items:center;gap:11px;background:linear-gradient(140deg,#f5fcfc,#ffffff);border:1px solid #d4e9ed;border-radius:13px;padding:15px;cursor:pointer;color:#204d60}
+.dest-choice-option:has(input:checked){background:#e9fafa;border-color:#0ba8a2;box-shadow:0 0 0 2px rgba(13,172,167,.08)}
+.dest-choice-option input{accent-color:#0ca7a4;width:18px;height:18px;flex-shrink:0}
+.dest-choice-option span{display:flex;flex-direction:column;gap:4px}.dest-choice-option strong{font-size:13px}.dest-choice-option small{font-size:11px;color:#5d8b9a}
+.dest-fields{min-width:0}.dest-fields[hidden]{display:none!important}
+.inline-item-button{font-size:10px!important;padding:6px 10px!important;display:inline-flex;margin-top:7px;white-space:normal;text-align:center}
+.ship-line .db-field{align-content:start}
+@media(max-width:700px){.dest-choice{grid-template-columns:1fr}.dest-choice-option{padding:12px}}
+
+/* V4.7 — easy-to-compare incoming and outgoing routes, with emergency paperwork. */
+.dest-choice.three-routes{grid-template-columns:repeat(3,minmax(0,1fr))}
+.dest-choice.four-routes{grid-template-columns:repeat(2,minmax(0,1fr))}
+.dest-choice-option{min-height:78px}
+.dest-choice-option:has(input:focus-visible){outline:3px solid rgba(10,169,163,.35);outline-offset:2px}
+.shipment-lines-title{font-size:13px;margin:4px 0;color:#20495e}
+.emergency-check{display:flex;gap:11px;align-items:flex-start;padding:13px;border:1px solid #f3ddad;background:#fff9ed;border-radius:12px;color:#85601c;cursor:pointer}
+.emergency-check:has(input:checked){background:#fff1d7;border-color:#d99d32}
+.emergency-check input{accent-color:#d68a19;width:17px;height:17px;margin-top:1px;flex:none}
+.emergency-check span{display:flex;flex-direction:column;gap:4px}
+.emergency-check strong{font-size:11px}.emergency-check small{font-size:10px;line-height:1.6}
+@media(max-width:1000px){.dest-choice.three-routes{grid-template-columns:1fr}}
+@media(max-width:700px){.dest-choice.four-routes{grid-template-columns:1fr}.dest-choice-option{min-height:60px}}

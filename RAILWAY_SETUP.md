@@ -1,3 +1,19 @@
+# Deploy V4.7 to the EXISTING Railway service
+
+**Same private GitHub repository, same Railway service, same persistent `/data` volume.** Export a backup before updating code. `/api/health` must show `release: 4.7.0` and `version: 6` after redeploy. The additive migration adds shipment route, trusted pharmacist, and emergency paperwork fields without deleting old stock or history. See `V4_7_SHIPMENT_ROUTES.md` for all three outgoing and four incoming routes.
+
+---
+
+# Deploy V4.6 to your EXISTING Railway service
+
+**Do not create a new service or a new database.** Keep the same private GitHub repository, Railway service, and existing `/data` volume. Upload only the updated source code. Before deployment, export a database backup from the existing app.
+
+Run the current release check at `https://YOUR-DOMAIN/api/health` and confirm **`release: 4.6.0` / `version: 5`**. This update adds item prices, outgoing destination and paperwork fields, and movement price snapshots in place. Existing records remain intact. For the exact new behavior and migration notes, read `V4_6_CHANGES.md`.
+
+---
+
+## Prior deployment instructions (V4.5)
+
 # V4.5: fixed Add Item UI, one new Medication book; no database-schema changes.
 
 For detailed verification of your Railway deployment, read **V4_5_DEPLOY_AND_VERIFY.md**.

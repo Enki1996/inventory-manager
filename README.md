@@ -1,53 +1,30 @@
-# Hospital Warehouse IMS V4.5 — Arabic-first, branch-specific Add Item forms
+# Hospital Warehouse IMS V4.7 — Seven Shipment Routes
 
-This is a **shared testing application** for a single hospital warehouse. It contains a FastAPI server, SQLite database, login and permission checks, home/login/dashboard UI, receiving/issuing/returns, movement and requisition history, branch-specific books, and backup/restore. The default language is Arabic, with an English switch. The approved white / icy-blue / teal design is unchanged.
+One central hospital warehouse, three fixed warehouse branches, twenty approved registers, full item pricing in Iraqi dinar and fils, batch-level stock and expiration tracking, scoped employee permissions, audit history, and portable database backup/restore.
 
-## New in V4.5
+**New V4.7 workflow:** Three outgoing shipment routes and four incoming shipment routes. Emergency department issues may be recorded before paper references are available; both document numbers can be added afterward with an audit entry and without repeating the stock movement. External transfer forms use a trusted pharmacist selected from active employee accounts.
 
-The **first field is Warehouse Branch**. The rest of the Add/Edit Item form changes dynamically:
+See **[V4_7_SHIPMENT_ROUTES.md](V4_7_SHIPMENT_ROUTES.md)** for exact route fields, deployment, migration and testing. Previous version notes remain in `V4_6_CHANGES.md` and `V4_5_DEPLOY_AND_VERIFY.md`.
 
-- **Medication**: Branch → Trade name (الاسم التجاري) → Scientific name (الاسم العلمي) → Unit (حب / كبسول / بطل / امبول / فيال / انبوب / تحاميل / قطرات) → Book → Batch number (الوجبة) → **Expiry (required)** → Manufacture date → Manufacturer → Information / alternate names.
-- **Medical supplies**: Branch → Item name → Unit (قطعة / كيس / بطل / باكة / رولة / باكيت / درزن) → Book → Batch number → **Expiry (required)** → Manufacture date → Manufacturer → Information / alternate names.
-- **Surgical instruments**: Same as supplies, with the **single unit قطعة** and only this branch's two approved books.
+## Release verification
 
-Branch and Book still enforce the V4.3 categories (plus the V4.5 added medication register) and V4.2 employee branch restrictions on the server. Each new item receives an **automatically generated SKU** rather than requiring the clerk to type a product code.
+`/api/health` returns `{"ok":true,"database":"sqlite","version":6,"release":"4.7.0"}`.
 
-The batch number entered in Add Item creates a **zero-stock registered batch** (not a receipt); stock quantities change only when staff record incoming/outgoing shipments. The original batch expiry of existing movements is never silently overwritten. The Catalog's reference expiry is required for new items but independent from the actual per-batch expiry used to issue stock.
-
-See [V4_5_DEPLOY_AND_VERIFY.md](V4_5_DEPLOY_AND_VERIFY.md) for implementation detail, schema compatibility, and all unit lists. The allowed units live in `unit_catalog.py`, official books in `book_catalog.py`, and editable Arabic UI strings in `static/locales/ar.json`.
-
-## Medication register added in V4.5
-
-**سجل المغذيات - قسم الصيدلة** is now available in the Medication book dropdown (11 medication books, 20 books total). No existing book records are deleted or renamed.
-
-The Add Item modal shows **V4.5** beside its heading, and `/api/health` returns `"release":"4.5.0"` for deployment verification. The new frontend assets are cache-busted.
-
-## Deployment and preserving data
-
-1. **Before changing code**, download a database backup from the running app and store it securely.
-2. Extract the ZIP and update the **same private GitHub repository** with the files, not the ZIP archive itself.
-3. Redeploy the **same Railway service** with its existing persistent `/data` volume and `WAREHOUSE_DATA_DIR=/data` unchanged. Never replace or detach that volume just to update code.
-4. V4.5 retains the V4.4 columns (`trade_name`, `initial_batch_no`) at startup; existing items, batches, departments, staff accounts, and movements remain in place. Previously registered items are *not* guessed or renamed; when edited, missing mandatory fields will need to be supplied.
-5. After deployment, sign in, check existing stock and users, and create a **dummy** item under each branch to verify the new form before real data entry.
-
-See [RAILWAY_SETUP.md](RAILWAY_SETUP.md) for first-time deployment details. Do not commit `.env`, `warehouse.sqlite3`, `/data`, or backup ZIPs to GitHub.
-
-## Running locally
-
-`pip install -r requirements.txt` then `uvicorn app:app --host 127.0.0.1 --port 8000`, and open `http://127.0.0.1:8000`. The **local demonstration only** creates the testing login `enki / 123`; public deployment **must** use a strong secret through `WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD`. Never expose `123` online.
-
-## Automated regression tests
-
-Run from this folder:
+## Local testing
 
 ```sh
-python test_v45_exact_form.py
-python test_v44_item_form.py
-python test_flow.py
-python test_books.py
-python test_branches.py
-python test_item_details.py
-python test_upgrade_from_v41.py
+pip install -r requirements.txt
+uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-All automated tests use temporary databases. This build is for collaborative testing, **not production hospital inventory**: backups currently are not encrypted and automated off-site recovery and operational security still need hardening. No patient-identifying data should be entered for testing.
+For **local-only testing**, the initial account is `enki` with password `123`. This password is **blocked for public deployment**. Configure the strong private `WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD` in Railway. Do not place credentials in GitHub or chat.
+
+Run current automated tests from this folder with `python test_v47_routes.py`. Historic tests from older versions are archived under `tests_legacy/` because their previous two-route API contract no longer applies.
+
+## Deployment
+
+Keep the same private GitHub repository, Railway service, and persistent `/data` volume. Export a backup before deploying. Copy V4.7 code onto the same repository and redeploy; the database schema migration is additive and preserves existing inventory and movement history. Never upload the live SQLite file to GitHub.
+
+The interface defaults to Arabic with an English toggle. Edit Arabic translations in `static/locales/ar.json`; product and account names retain exactly the values employees enter.
+
+This is a collaborative testing tool, **not** yet a fully validated clinical inventory system. Use fictitious inventory, not confidential hospital data, until security, operational controls, and backup recovery are reviewed.

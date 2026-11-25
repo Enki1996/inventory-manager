@@ -47,9 +47,9 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.5.0'
+APP_RELEASE = '4.7.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -248,6 +248,75 @@ def item_details(d):
     return generic_name, manufacturer, manufacture_date, expiry_date, information
 
 
+
+def migrate_outgoing_and_price(c: sqlite3.Connection):
+    """V4 -> V5 additive migration; legacy prices remain unknown (NULL)."""
+    item_cols = {r[1] for r in c.execute('PRAGMA table_info(items)')}
+    if 'price_fils' not in item_cols:
+        c.execute('ALTER TABLE items ADD COLUMN price_fils INTEGER CHECK(price_fils >= 0)')
+    line_cols = {r[1] for r in c.execute('PRAGMA table_info(movement_lines)')}
+    if 'unit_price_fils' not in line_cols:
+        c.execute('ALTER TABLE movement_lines ADD COLUMN unit_price_fils INTEGER CHECK(unit_price_fils >= 0)')
+    movement_cols = {r[1] for r in c.execute('PRAGMA table_info(movements)')}
+    for field, definition in (
+        ('destination_type', "TEXT CHECK(destination_type IN ('department','external') OR destination_type IS NULL)"),
+        ('external_destination', "TEXT NOT NULL DEFAULT ''"),
+        ('dispatch_ref', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if field not in movement_cols:
+            c.execute(f'ALTER TABLE movements ADD COLUMN {field} {definition}')
+    # Old OUT movements are department distributions, but do not invent a missing dispatch reference.
+    c.execute("UPDATE movements SET destination_type='department' WHERE kind='OUT' AND department_id IS NOT NULL AND destination_type IS NULL")
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+
+# Explicit, auditable shipment routes (one central warehouse).
+OUT_ROUTES = ('department_issue', 'external_transfer_out', 'pharmacy_transfer_out')
+IN_ROUTES = ('pharmacy_receipt', 'purchase_receipt', 'external_transfer_in', 'internal_return')
+PHARMACY_DESTINATION = 'قسم الصيدلة'
+
+
+def migrate_shipment_routes(c: sqlite3.Connection):
+    """Add new route and delayed-paperwork metadata; preserve every legacy movement."""
+    columns = {row[1] for row in c.execute('PRAGMA table_info(movements)')}
+    for name, definition in (
+        ('route', 'TEXT'),
+        ('trusted_pharmacist_id', 'INTEGER REFERENCES users(id) ON DELETE RESTRICT'),
+        ('paperwork_pending', 'INTEGER NOT NULL DEFAULT 0 CHECK(paperwork_pending IN (0,1))'),
+        ('paperwork_completed_at', 'TEXT'),
+        ('paperwork_completed_by', 'INTEGER REFERENCES users(id) ON DELETE RESTRICT'),
+    ):
+        if name not in columns:
+            c.execute(f'ALTER TABLE movements ADD COLUMN {name} {definition}')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def boolean_flag(value, field):
+    if value in (True, 1, '1'):
+        return True
+    if value in (False, 0, '0', '', None):
+        return False
+    err(422, f'{field} must be a checkbox value')
+
+
+def active_pharmacist(c, user_id):
+    if user_id is None:
+        return None
+    row = c.execute('SELECT id,username,full_name FROM users WHERE id=? AND is_active=1', (user_id,)).fetchone()
+    if not row:
+        err(422, 'Choose an active trusted pharmacist from registered accounts')
+    return dict(row)
+
+
+def price_from_fields(d):
+    """Store price per catalog stock unit as exact integer fils (1 IQD = 1000 fils)."""
+    dinars = integer(d, 'price_dinars', 0, 999_999_999)
+    fils = integer(d, 'price_fils_component', 0, 999)
+    return dinars * 1000 + fils
+
 def init_db():
     with db() as c:
         c.executescript('''
@@ -291,6 +360,7 @@ def init_db():
                 manufacture_date TEXT,
                 expiry_date TEXT,
                 information TEXT NOT NULL DEFAULT '',
+                price_fils INTEGER CHECK(price_fils >= 0),
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
@@ -311,6 +381,14 @@ def init_db():
                 department_id INTEGER REFERENCES departments(id) ON DELETE RESTRICT,
                 source TEXT NOT NULL DEFAULT '',
                 notes TEXT NOT NULL DEFAULT '',
+                destination_type TEXT CHECK(destination_type IN ('department','external') OR destination_type IS NULL),
+                external_destination TEXT NOT NULL DEFAULT '',
+                dispatch_ref TEXT NOT NULL DEFAULT '',
+                route TEXT,
+                trusted_pharmacist_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+                paperwork_pending INTEGER NOT NULL DEFAULT 0 CHECK(paperwork_pending IN (0,1)),
+                paperwork_completed_at TEXT,
+                paperwork_completed_by INTEGER REFERENCES users(id) ON DELETE RESTRICT,
                 created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                 created_at TEXT NOT NULL
             );
@@ -319,7 +397,8 @@ def init_db():
                 movement_id INTEGER NOT NULL REFERENCES movements(id) ON DELETE RESTRICT,
                 batch_id INTEGER NOT NULL REFERENCES batches(id) ON DELETE RESTRICT,
                 qty INTEGER NOT NULL CHECK(qty > 0),
-                direction INTEGER NOT NULL CHECK(direction IN (-1,1))
+                direction INTEGER NOT NULL CHECK(direction IN (-1,1)),
+                unit_price_fils INTEGER CHECK(unit_price_fils >= 0)
             );
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -332,6 +411,8 @@ def init_db():
         migrate_item_details(c)
         migrate_branches(c)
         migrate_item_form(c)
+        migrate_outgoing_and_price(c)
+        migrate_shipment_routes(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
             old = c.execute("SELECT password_hash FROM users WHERE username='enki'").fetchone()
@@ -604,18 +685,19 @@ async def create_item(request: Request):
     batch_no = item_batch_no(d)
     sku = validated_text(d, 'sku', required=False, max_len=50).upper() or make_sku(branch)
     generic, manufacturer, mfg, exp, info = item_details(d)
+    unit_price = price_from_fields(d)
     try:
         with db() as c:
             q = c.execute('''INSERT INTO items(sku,name,category,branch,unit,generic_name,trade_name,initial_batch_no,
-                            manufacturer,manufacture_date,expiry_date,information,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                          (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,now()))
+                            manufacturer,manufacture_date,expiry_date,information,price_fils,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,now()))
             # Register a batch with zero stock; it becomes available only after an IN movement.
             c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
                       (q.lastrowid,batch_no,exp,now()))
             audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':cat,'unit':unit,'initial_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info})
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price})
             return {'ok': True, 'id': q.lastrowid, 'sku':sku}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
@@ -637,6 +719,7 @@ async def update_item(item_id: int, request: Request):
             category = require_book(branch, d.get('category'))
             name, trade = item_name_fields(d, branch)
             generic, manufacturer, mfg, exp, info = item_details(d)
+            unit_price = price_from_fields(d)
             # Hidden legacy generic-name field must survive an edit in the new form.
             if 'generic_name' not in d:
                 generic = old['generic_name']
@@ -656,12 +739,12 @@ async def update_item(item_id: int, request: Request):
                 c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
                           (item_id,batch_no,exp,now()))
             c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,trade_name=?,initial_batch_no=?,
-                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,active=? WHERE id=?''',
-                      (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,
+                         manufacturer=?,manufacture_date=?,expiry_date=?,information=?,price_fils=?,active=? WHERE id=?''',
+                      (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,
                        1 if d.get('active',True) else 0,item_id))
             audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':category,'unit':unit,'reference_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info})
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price})
         return {'ok': True}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
@@ -682,14 +765,16 @@ def movements(request: Request):
     get_user(request)
     with db(readonly=True) as c:
         res = [dict(x) for x in c.execute('''SELECT m.*,d.name department_name,u.username creator,
+                       p.full_name trusted_pharmacist_name,p.username trusted_pharmacist_username,
                        COUNT(l.id) line_count,SUM(l.qty) total_units
                        FROM movements m LEFT JOIN departments d ON d.id=m.department_id
+                       LEFT JOIN users p ON p.id=m.trusted_pharmacist_id
                        JOIN users u ON u.id=m.created_by JOIN movement_lines l ON l.movement_id=m.id
                        GROUP BY m.id ORDER BY m.id DESC LIMIT 500''')]
         ids = [x['id'] for x in res]
         if ids:
             ph = ','.join('?' for _ in ids)
-            lines = [dict(x) for x in c.execute(f'''SELECT ml.movement_id,ml.qty,ml.direction,b.batch_no,b.expiry_date,
+            lines = [dict(x) for x in c.execute(f'''SELECT ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,b.batch_no,b.expiry_date,
                              i.sku,i.name item_name,i.unit FROM movement_lines ml
                              JOIN batches b ON b.id=ml.batch_id JOIN items i ON i.id=b.item_id
                              WHERE ml.movement_id IN ({ph}) ORDER BY ml.id''', ids)]
@@ -715,23 +800,80 @@ async def create_movement(request: Request):
         err(422, 'Invalid movement type')
     if kind.startswith('ADJUST'):
         permit(u, 'adjust')
-    paper_ref = validated_text(d, 'paper_ref', required=kind in ('OUT','IN'), max_len=80)
-    source = validated_text(d, 'source', required=kind == 'IN', max_len=140)
-    notes = validated_text(d, 'notes', required=False, max_len=500)
-    department_id = d.get('department_id')
-    if kind in ('OUT','RETURN'):
+
+    # Route is authoritative: old clients may omit it for legacy inbound receipts,
+    # but all new outgoing transfers must choose one of three explicit routes.
+    route = str(d.get('route') or '').strip()
+    if kind == 'OUT':
+        if route not in OUT_ROUTES:
+            err(422, 'Choose one of the three outgoing shipment routes')
+    elif kind == 'IN':
+        route = route or 'purchase_receipt'  # Legacy quick-receipt compatibility.
+        if route not in IN_ROUTES or route == 'internal_return':
+            err(422, 'Choose a valid incoming receipt route')
+    elif kind == 'RETURN':
+        route = route or 'internal_return'
+        if route != 'internal_return':
+            err(422, 'Department returns must use the internal return route')
+    elif route:
+        err(422, 'Adjustment transactions do not have a shipment route')
+
+    emergency = boolean_flag(d.get('emergency_pending'), 'emergency_pending')
+    if emergency and not (kind == 'OUT' and route == 'department_issue'):
+        err(422, 'Delayed paperwork is available only for emergency department issues')
+    department_id = None
+    destination_type = None
+    external_destination = ''
+    source = ''
+    trusted_id = None
+    if kind == 'OUT':
+        if route == 'department_issue':
+            destination_type = 'department'
+            department_id = integer(d, 'department_id', minimum=1)
+            if str(d.get('external_destination') or '').strip():
+                err(422, 'Department issues cannot specify an external destination')
+        else:
+            destination_type = 'external'
+            if d.get('department_id') not in (None, '', 0):
+                err(422, 'Transfer routes cannot specify a hospital department ID')
+            external_destination = (validated_text(d, 'external_destination', max_len=180)
+                                    if route == 'external_transfer_out' else PHARMACY_DESTINATION)
+            trusted_id = integer(d, 'trusted_pharmacist_id', minimum=1)
+    elif kind == 'IN':
+        if route == 'pharmacy_receipt':
+            source = PHARMACY_DESTINATION
+        elif route == 'purchase_receipt':
+            source = validated_text(d, 'source', max_len=180)
+        elif route == 'external_transfer_in':
+            source = validated_text(d, 'source', max_len=180)
+            trusted_id = integer(d, 'trusted_pharmacist_id', minimum=1)
+    elif kind == 'RETURN':
         department_id = integer(d, 'department_id', minimum=1)
     else:
-        department_id = None
+        source = validated_text(d, 'source', required=False, max_len=180)
+
+    paper_required = kind in ('IN','OUT','RETURN') and not emergency
+    paper_ref = validated_text(d, 'paper_ref', required=paper_required, max_len=80)
+    dispatch_required = (kind == 'RETURN' or (kind == 'OUT' and route == 'department_issue')) and not emergency
+    dispatch_ref = validated_text(d, 'dispatch_ref', required=dispatch_required, max_len=80)
+    notes = validated_text(d, 'notes', required=False, max_len=500)
     lines = d.get('lines')
     if not isinstance(lines, list) or not 1 <= len(lines) <= 50:
         err(422, 'Provide 1 to 50 shipment line items')
-    # Validate and commit entire movement atomically; no partial stock deduction.
+
+    # Database transaction is atomic: no partial issue if any line or document fails.
     with db() as c:
         if department_id and not c.execute('SELECT 1 FROM departments WHERE id=? AND active=1', (department_id,)).fetchone():
-            err(422, 'Choose an active department')
-        created = c.execute('INSERT INTO movements(code,kind,paper_ref,department_id,source,notes,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)',
-                            ('TEMP-'+secrets.token_hex(6),kind,paper_ref,department_id,source,notes,u['id'],now()))
+            err(422, 'Choose an active hospital department')
+        pharmacist = active_pharmacist(c, trusted_id)
+        created = c.execute('''INSERT INTO movements(
+                          code,kind,paper_ref,department_id,source,notes,destination_type,
+                          external_destination,dispatch_ref,route,trusted_pharmacist_id,
+                          paperwork_pending,created_by,created_at)
+                          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          ('TEMP-'+secrets.token_hex(6),kind,paper_ref,department_id,source,notes,
+                           destination_type,external_destination,dispatch_ref,route,trusted_id,
+                           1 if emergency else 0,u['id'],now()))
         mid = created.lastrowid
         code = movement_code(kind, mid)
         c.execute('UPDATE movements SET code=? WHERE id=?', (code,mid))
@@ -750,16 +892,15 @@ async def create_movement(request: Request):
                                         (iid,batchno,exp)).fetchone()
                 if conflicting:
                     err(409, f'Batch {batchno} already exists with a different expiration date')
-                batch = c.execute('SELECT id FROM batches WHERE item_id=? AND batch_no=? AND COALESCE(expiry_date,\'\')=COALESCE(?,\'\')',
+                batch = c.execute('''SELECT id FROM batches WHERE item_id=? AND batch_no=? AND COALESCE(expiry_date,'')=COALESCE(?,'')''',
                                   (iid,batchno,exp)).fetchone()
-                if batch:
-                    batch_id = batch['id']
-                else:
-                    batch_id = c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
-                                         (iid,batchno,exp,now())).lastrowid
+                batch_id = batch['id'] if batch else c.execute(
+                    'INSERT INTO batches(item_id,batch_no,expiry_date,created_at) VALUES(?,?,?,?)',
+                    (iid,batchno,exp,now())).lastrowid
             else:
                 batch_id = integer(line,'batch_id',1)
-                batch = c.execute('''SELECT b.id,b.expiry_date,i.branch,i.active item_active FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?''',
+                batch = c.execute('''SELECT b.id,b.expiry_date,i.branch,i.active item_active
+                                   FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?''',
                                   (batch_id,)).fetchone()
                 if not batch or not batch['item_active']:
                     err(422,'Batch not found or product is inactive')
@@ -773,10 +914,45 @@ async def create_movement(request: Request):
                               (qty,batch_id,qty))
                 if r.rowcount != 1:
                     err(409, 'Insufficient stock in the selected batch. Shipment not saved.')
-            c.execute('INSERT INTO movement_lines(movement_id,batch_id,qty,direction) VALUES (?,?,?,?)',
-                      (mid,batch_id,qty,direction))
-        audit(c,u['id'],'MOVEMENT_CREATED',{'id':mid,'code':code,'type':kind,'paper_ref':paper_ref,'line_count':len(lines)})
-    return {'ok':True,'code':code,'id':mid}
+            unit_price = c.execute('''SELECT i.price_fils FROM items i JOIN batches b ON b.item_id=i.id WHERE b.id=?''', (batch_id,)).fetchone()['price_fils']
+            c.execute('INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils) VALUES (?,?,?,?,?)',
+                      (mid,batch_id,qty,direction,unit_price))
+        audit(c,u['id'],'MOVEMENT_CREATED',{
+            'id':mid,'code':code,'kind':kind,'route':route,'paper_ref':paper_ref,
+            'dispatch_ref':dispatch_ref,'department_id':department_id,'source':source,
+            'destination':external_destination,'trusted_pharmacist_id':trusted_id,
+            'trusted_pharmacist':pharmacist['full_name'] if pharmacist else None,
+            'emergency_pending':emergency,'line_count':len(lines)})
+    return {'ok':True,'code':code,'id':mid,'paperwork_pending':emergency}
+
+
+@app.patch('/api/movements/{movement_id}/paperwork')
+async def complete_emergency_paperwork(movement_id: int, request: Request):
+    # Append missing emergency paperwork while preserving the original issue and stock.
+    u = get_user(request, require_csrf=True)
+    permit(u, 'movement_write')
+    d = await request.json()
+    order_ref = validated_text(d, 'paper_ref', max_len=80)
+    dispatch_ref = validated_text(d, 'dispatch_ref', max_len=80)
+    with db() as c:
+        movement = c.execute('SELECT * FROM movements WHERE id=?', (movement_id,)).fetchone()
+        if not movement:
+            err(404, 'Movement not found')
+        if not (movement['kind'] == 'OUT' and movement['route'] == 'department_issue'
+                and movement['paperwork_pending'] == 1):
+            err(409, 'Only outstanding emergency department paperwork can be completed')
+        rows = c.execute('''SELECT DISTINCT i.branch FROM movement_lines l JOIN batches b ON l.batch_id=b.id
+                             JOIN items i ON b.item_id=i.id WHERE l.movement_id=?''', (movement_id,)).fetchall()
+        for r in rows:
+            restrict_branch(u, r['branch'])
+        old = {'paper_ref':movement['paper_ref'],'dispatch_ref':movement['dispatch_ref']}
+        c.execute('''UPDATE movements SET paper_ref=?,dispatch_ref=?,paperwork_pending=0,
+                     paperwork_completed_at=?,paperwork_completed_by=? WHERE id=?''',
+                  (order_ref,dispatch_ref,now(),u['id'],movement_id))
+        audit(c,u['id'],'EMERGENCY_PAPERWORK_COMPLETED',{
+            'movement_id':movement_id,'code':movement['code'],'previous':old,
+            'paper_ref':order_ref,'dispatch_ref':dispatch_ref})
+    return {'ok':True,'code':movement['code'],'paperwork_pending':False}
 
 
 @app.get('/api/dashboard')
@@ -792,6 +968,15 @@ def dashboard_data(request: Request):
         soon = c.execute('''SELECT COUNT(*) n FROM batches WHERE on_hand>0 AND expiry_date IS NOT NULL
                             AND expiry_date>=date('now') AND expiry_date<=date('now','+60 days')''').fetchone()['n']
         return {'items':total_items,'stock':total_units,'departments':dept,'movements':movements_count,'low_stock':low,'expiry_soon':soon}
+
+
+@app.get('/api/staff-directory')
+def staff_directory(request: Request):
+    get_user(request)
+    with db(readonly=True) as c:
+        # Public account directory only: never expose password hashes or session tokens.
+        return [dict(r) for r in c.execute('''SELECT id,username,full_name,branch
+                    FROM users WHERE is_active=1 ORDER BY full_name COLLATE NOCASE,username''')]
 
 
 @app.get('/api/users')
@@ -938,7 +1123,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 if info.file_size > 220*1024*1024:
                     err(413,'Uncompressed backup is too large')
                 manifest = json.loads(z.read('manifest.json'))
-                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, 2, 3, SCHEMA_VERSION):
+                if manifest.get('application')!='Hospital Warehouse IMS' or manifest.get('schema_version') not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
                     err(422,'Not a compatible warehouse backup')
                 data = z.read('warehouse.sqlite3')
                 if hashlib.sha256(data).hexdigest()!=manifest.get('sha256'):
@@ -979,6 +1164,21 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 actual_columns = {row[1] for row in verify.execute('PRAGMA table_info(items)')}
                 if not {'trade_name','initial_batch_no'}.issubset(actual_columns):
                     err(422, 'Backup declares V4 but is missing registered item fields')
+            if version < 5:
+                migrate_outgoing_and_price(verify)
+            else:
+                item_cols = {r[1] for r in verify.execute('PRAGMA table_info(items)')}
+                move_cols = {r[1] for r in verify.execute('PRAGMA table_info(movements)')}
+                if 'price_fils' not in item_cols or 'unit_price_fils' not in {r[1] for r in verify.execute('PRAGMA table_info(movement_lines)')} or not {'destination_type','external_destination','dispatch_ref'}.issubset(move_cols):
+                    err(422, 'Backup declares V5 but is missing price/transfer fields')
+            if version < 6:
+                migrate_shipment_routes(verify)
+            else:
+                columns = {r[1] for r in verify.execute('PRAGMA table_info(movements)')}
+                required_v6 = {'route','trusted_pharmacist_id','paperwork_pending',
+                               'paperwork_completed_at','paperwork_completed_by'}
+                if not required_v6.issubset(columns):
+                    err(422, 'Backup declares V6 but is missing shipment route and paperwork fields')
             verify.commit()
         except sqlite3.DatabaseError:
             err(422,'Invalid SQLite backup contents')

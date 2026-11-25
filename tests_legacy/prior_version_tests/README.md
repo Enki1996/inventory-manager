@@ -1,0 +1,1 @@
+Historical test scripts targeting V3–V4.5 contracts. They are saved for audit and migration reference, but are not the current V4.7 test entry point because item price and outgoing paper references are now mandatory. Run `python test_v47_routes.py` at the project root for the current build.
