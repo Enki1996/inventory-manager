@@ -51,7 +51,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 9
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.17.0'
+APP_RELEASE = '4.19.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -1526,6 +1526,19 @@ def list_users(request: Request):
                                                FROM users ORDER BY is_active DESC,id''')]
 
 
+@app.get('/api/users/{user_id}/profile')
+def user_profile_for_admin(user_id: int, request: Request):
+    u = get_user(request)
+    if u['role'] != 'admin':
+        err(403, 'Only administrators can view employee profile details')
+    with db(readonly=True) as c:
+        row = c.execute('''SELECT id,username,full_name,role,branch,email,phone,age,job_title,is_active
+                             FROM users WHERE id=?''' , (user_id,)).fetchone()
+        if row is None:
+            err(404, 'User not found')
+        return dict(row)
+
+
 @app.post('/api/users')
 async def create_user(request: Request):
     u = get_user(request, require_csrf=True)
@@ -1599,8 +1612,8 @@ async def reset_user_password(user_id: int, request: Request):
 @app.get('/api/audit')
 def audit_history(request: Request):
     u = get_user(request)
-    if u['role'] not in ('admin','manager'):
-        err(403,'Only management can view audit logs')
+    if u['role'] != 'admin':
+        err(403,'Only administrators can view audit logs')
     with db(readonly=True) as c:
         return [dict(x) for x in c.execute('''SELECT a.id,a.action,a.detail,a.created_at,u.username
                                              FROM audit_log a LEFT JOIN users u ON a.user_id=u.id ORDER BY a.id DESC LIMIT 300''')]

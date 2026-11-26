@@ -1,4 +1,4 @@
-/* Live V4.17 bilingual warehouse application: all stock, including opening balances, is audited. */
+/* Live V4.19 bilingual warehouse application: all stock, including opening balances, is audited. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -16,6 +16,7 @@ const DEFAULT_SCARCE_PERCENT='20', DEFAULT_SURPLUS_PERCENT='120';
 let statementExpiryBefore='', statementScarcePct=DEFAULT_SCARCE_PERCENT, statementSurplusPct=DEFAULT_SURPLUS_PERCENT;
 // V4.13: filters and selected table columns are presentation-only. Data is unchanged.
 const expandedItems=new Set();
+const expandedFullInfo=new Set(); // second-level details are collapsed by default
 let inventoryState='available', inventorySort='name', inventoryInactive=false;
 let statementBook='', statementSort='name';
 const COLS=[
@@ -108,7 +109,7 @@ const headerFor=k=>COLS.find(c=>c[0]===k)?.[1]||k;
 function itemColumn(it,stat,key,context){
  const pct=context?.percent_of_need;
  switch(key){
-  case 'name':return `<strong>${E(it.trade_name||it.name)}</strong>${it.trade_name?`<div class="tiny">${E(it.name)}</div>`:''}<div class="tiny">${E(it.sku)}</div>`;
+  case 'name':return `${stat.lots.length>1?`<strong>${E(it.trade_name||it.name)}</strong>`:`<button type="button" class="item-name-open" data-expand-item="${it.id}" aria-expanded="${expandedItems.has(it.id)}" aria-label="View item details">${E(it.trade_name||it.name)}</button>`}${it.trade_name?`<div class="tiny">${E(it.name)}</div>`:''}<div class="tiny">${E(it.sku)}</div>`;
   case 'branch':return badge(branchName(it.branch),it.branch?'blue':'warning');
   case 'book':return E(it.category||'—');
   case 'unit':return E(it.unit||'—');
@@ -116,7 +117,7 @@ function itemColumn(it,stat,key,context){
   case 'usable':return `<strong>${N(stat.usable)}</strong> ${E(it.unit)}`;
   case 'expired':return stat.expired?badge(`${N(stat.expired)} ${it.unit}`,'danger'):`${N(0)}`;
   case 'unknown':return stat.unknown?badge(`${N(stat.unknown)} ${it.unit}`,'warning'):'0';
-  case 'lots':return `<div class="lots-cell"><strong>${N(stat.lots.length)}</strong><span class="tiny">lots</span><button type="button" class="lot-open-btn" data-expand-item="${it.id}" aria-label="View all ${N(stat.lots.length)} stored lots">${expandedItems.has(it.id)?'Hide lots ▴':'View lots ▾'}</button></div>`;
+  case 'lots':return `<div class="lots-cell"><strong>${N(stat.lots.length)}</strong><span class="tiny">lots</span></div>`;
   case 'next':return E(stat.next||'—');
   case 'price':return priceLabel(it.price_fils);
   case 'annual':return it.annual_need==null?'—':`${N(it.annual_need)} ${E(it.unit)}`;
@@ -148,18 +149,24 @@ function fullItemPanel(it,stat){
  return `<div class="expanded-item-panel"><div class="expanded-header"><h3>All stored lots — ${E(it.trade_name||it.name)}</h3><span class="lot-summary-count">${N(lots.length)} stored lot(s)</span></div>
  <p class="lot-table-intro">Every lot is listed separately with its own expiry date, remaining quantity and stored unit price—even when batch numbers repeat.</p>
  ${lots.length?table(['#','Batch number','Manufacture date','Expiry date','Remaining quantity','Stored lot price','Status'],lotRows):msg('No lots registered','This product has not been received yet.')}
- <h3>Full item information</h3>
- <div class="full-item-fields">${fieldValues.map(([label,v])=>`<div class="full-field"><span>${E(label)}</span><strong>${E(v??'—')}</strong></div>`).join('')}</div>
- <div class="item-ledger-heading"><h3>Complete recorded movement history</h3><span class="muted-hint">Fetched from the database in pages, including older movements.</span></div>
- <div data-item-history="${it.id}"><button type="button" class="db-btn secondary small" data-load-item-history="${it.id}" data-history-offset="0">Load movement history</button></div></div>`;
+ <button type="button" class="expanded-secondary-toggle" data-toggle-item-extra="${it.id}" aria-controls="item-extra-${it.id}" aria-expanded="${expandedFullInfo.has(it.id)}">
+   <span>Full item information &amp; movement history</span><span class="expanded-extra-chevron" aria-hidden="true">${expandedFullInfo.has(it.id)?'▴':'▾'}</span>
+ </button>
+ <div class="expanded-secondary" id="item-extra-${it.id}" data-item-extra="${it.id}" ${expandedFullInfo.has(it.id)?'':'hidden'}>
+   <h3>Full item information</h3>
+   <div class="full-item-fields">${fieldValues.map(([label,v])=>`<div class="full-field"><span>${E(label)}</span><strong>${E(v??'—')}</strong></div>`).join('')}</div>
+   <div class="item-ledger-heading"><h3>Complete recorded movement history</h3><span class="muted-hint">Fetched from the database in pages, including older movements.</span></div>
+   <div data-item-history="${it.id}"><button type="button" class="db-btn secondary small" data-load-item-history="${it.id}" data-history-offset="0">Load movement history</button></div>
+ </div></div>`;
 }
 function detailsTable(items,section,contexts={}){
  const chosen=allowedColumns(section).filter(k=>k==='name'||columnShown[section].includes(k));
- const columns=[''].concat(chosen.map(headerFor));
+ const columns=['#',''].concat(chosen.map(headerFor));
  const rows=[];
- for(const it of items){
+ for(const [i,it] of items.entries()){
   const stat=lotStats(it),id=it.id,open=expandedItems.has(id),ctx=contexts[id]||{};
-  rows.push(`<tr class="product-summary"><td><button type="button" class="expand-row-btn" data-expand-item="${id}" aria-expanded="${open}" aria-label="Expand item details" title="Expand item details">${open?'▴':'▾'}</button></td>${chosen.map(k=>`<td>${itemColumn(it,stat,k,ctx)}</td>`).join('')}</tr>`);
+  const arrow=stat.lots.length>1?`<button type="button" class="expand-row-btn" data-expand-item="${id}" aria-expanded="${open}" aria-label="Expand stored lots" title="Expand stored lots">${open?'▴':'▾'}</button>`:'';
+  rows.push(`<tr class="product-summary"><td><span class="item-row-number">${N(i+1)}</span></td><td class="item-expand-cell">${arrow}</td>${chosen.map(k=>`<td>${itemColumn(it,stat,k,ctx)}</td>`).join('')}</tr>`);
   rows.push(`<tr class="product-detail-row" data-detail-row="${id}" ${open?'':'hidden'}><td colspan="${columns.length}">${open?fullItemPanel(it,stat):''}</td></tr>`);
  }
  return rows.length?table(columns,rows):msg('No matching items','Try changing the stock status or filters.');
@@ -198,7 +205,7 @@ async function reloadPositions(){
  }
 }
 
-const headers={overview:'Warehouse Overview',inventory:'Inventory',item_movement:'Item movements',profile:'My account',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
+const headers={overview:'Warehouse Overview',inventory:'Inventory',item_movement:'Item movements',profile:'My account',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Audit logs'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
 const branchName=b=>BRANCHES.find(x=>x[0]===b)?.[1]||'Unassigned — admin classification needed';
@@ -351,10 +358,10 @@ function movementRows(movements){return movements.map(m=>{
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Mfg: ${E(l.manufacture_date||'—')} · Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
+ return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map((l,i)=>`<div><span class="movement-item-number">${N(i+1)}.</span> <strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Mfg: ${E(l.manufacture_date||'—')} · Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
 })}
 
-function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
+function batchRows(rows){return rows.map((b,i)=>`<tr><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
 function overview(){
  const s=cache.dashboard;
  const metrics=[['Registered items',s.items,'Products in catalog','package'],['Warehouse units',s.stock,'Total stock across all batches','packages'],['Active departments',s.departments,'Distribution destinations','building'],['Recorded movements',s.movements,'Permanent transaction log','history']];
@@ -364,7 +371,7 @@ function overview(){
  return `<div class="db-decor">${head('Welcome back, '+user.full_name,'Your central warehouse is connected to the local database. Inventory and movements below update after every saved transaction.')}
  <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${can('department_write')?`<button class="db-btn secondary" data-new="dept">${I('building')} Add department</button>`:''}${can('movement_write')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button><button class="db-btn secondary" data-go="distribution">${I('outgoing')} Distribute stock</button>`:''}</div></div>
  ${user.role!=='admin'&&!user.branch?'<div class="db-alert"><strong>Warehouse branch not assigned.</strong> Ask your administrator to assign your account to one branch before managing stock.</div>':''}
- ${user.must_change_password?`<div class="db-alert"><strong>Change your temporary password.</strong> This account was created with a temporary login. Use Settings → Change Password before entering important data.</div>`:''}
+ ${user.must_change_password?`<div class="db-alert"><strong>Change your temporary password.</strong> Open My account → Change password to secure your login.</div>`:''}
  ${kpis}<div class="db-layout"><div>${panel('Recent warehouse movements',table(['Movement','Type','Paper reference','From / To','Lines','By'],movementRows(cache.movements.slice(0,6))),'history')}</div><div>${panel('Attention needed',`<div class="db-help">${I('warning')} ${alerts.length} item(s) under the reorder threshold · ${exp.length} batch(es) expiring in the next 60 days.</div><div style="margin-top:15px">${alerts.slice(0,5).map(i=>`<div style="display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #eaf1f4;font-size:11px"><span>${E(i.name)}</span><strong>${N(i.stock)} / ${N(i.min_stock)}</strong></div>`).join('')||'<p class="muted-hint">No low-stock alerts at the moment.</p>'}</div>`,'warning')}
  ${panel('Quick navigation',`<div class="db-actions"><button class="db-btn secondary" data-go="inventory">Inventory</button><button class="db-btn secondary" data-go="departments">Departments</button><button class="db-btn secondary" data-go="movements">Movement history</button></div>`,'dashboard')}</div></div>`
 }
@@ -382,22 +389,22 @@ function inventory(){return `${head('Item inventory','All product details and st
 function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments))}</div>`,'building')}`}
 function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q))));}
 
-// V4.17: dedicated item and department shipment timelines.
+// V4.18: dedicated item and department shipment timelines.
 function itemMovements(){
- const rows=cache.items.map(it=>{
+ const rows=cache.items.map((it,i)=>{
   const stat=lotStats(it);
-  return `<tr data-item-movement-row><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button type="button" class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
+  return `<tr data-item-movement-row><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button type="button" class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
  });
  return `${head('حركة المواد — Item movements','Choose any registered item to inspect every incoming, outgoing, opening-balance, return and adjustment document it appeared in.')}
- ${panel('All registered items',`<div class="db-toolbar">${inp('item-movement-search','Search item, scientific name, batch or alias...','search','id="itemMovementSearch"')}</div><div id="itemMovementResults">${table(['Product','Branch','Register book','Stock','Lots','Movement history'],rows)}</div>`,'history')}`;
+ ${panel('All registered items',`<div class="db-toolbar">${inp('item-movement-search','Search item, scientific name, batch or alias...','search','id="itemMovementSearch"')}</div><div id="itemMovementResults">${table(['#','Product','Branch','Register book','Stock','Lots','Movement history'],rows)}</div>`,'history')}`;
 }
 function filterItemMovements(){
  const q=normalizeItemSearch($('#itemMovementSearch')?.value||'');
- const rows=cache.items.filter(it=>!q||rowSearchText(it).includes(q)).map(it=>{
+ const rows=cache.items.filter(it=>!q||rowSearchText(it).includes(q)).map((it,i)=>{
   const stat=lotStats(it);
-  return `<tr><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
+  return `<tr><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
  });
- const root=$('#itemMovementResults');if(root)root.innerHTML=table(['Product','Branch','Register book','Stock','Lots','Movement history'],rows);
+ const root=$('#itemMovementResults');if(root)root.innerHTML=table(['#','Product','Branch','Register book','Stock','Lots','Movement history'],rows);
  window.HWLang?.apply();
 }
 let shipmentHistoryScope=null;
@@ -419,8 +426,8 @@ function shipmentCard(m,scope){
  const color=m.route==='opening_balance'?'adjustment':direction?'intake':'dispatch';
  const recipient=m.department_name||m.external_destination||m.source||'—';
  const documents=[['رقم الطلبية / Order',m.paper_ref],['ورقة التجهيز / Dispatch',m.dispatch_ref],['المصدر / الوجهة',recipient],['Route',route],['Employee',m.operator],['Trusted pharmacist',m.trusted_pharmacist_name],['رقم كتاب التخويل',m.authorization_ref]].filter(([,v])=>!!v);
- const lines=(m.lines||[]).map(l=>`<tr class="${scope.type==='item'&&l.item_id===scope.id?'selected-shipment-line':''}"><td>${E(l.trade_name||l.item_name)}<div class="tiny">${E(l.sku)}</div></td><td>${E(l.batch_no)}<div class="tiny">Lot ${N(l.lot_id)}</div></td><td>${E(l.manufacture_date||'—')}</td><td>${E(l.expiry_date||'—')}</td><td>${l.direction>0?'+':'−'}${N(l.qty)} ${E(l.unit)}</td><td>${priceLabel(l.unit_price_fils)}</td></tr>`);
- return `<article class="shipment-history-card"><div class="shipment-history-title"><div><strong>${E(m.code)}</strong><span class="tiny">${D(m.created_at)}</span></div>${badge(m.route==='opening_balance'?'رصيد افتتاحي':direction?'إدخال مخزني':'إخراج مخزني',color)}</div><div class="shipment-meta">${documents.map(([k,v])=>`<div><span>${E(k)}</span><strong>${E(v)}</strong></div>`).join('')}${m.paperwork_pending?'<div class="pending-paperwork">Emergency documents pending</div>':''}</div><div class="db-table-wrap">${table(['Product','Lot','Manufacture','Expiry','Quantity','Unit price'],lines)}</div>${m.notes?`<p class="shipment-notes">${E(m.notes)}</p>`:''}</article>`;
+ const lines=(m.lines||[]).map((l,i)=>`<tr class="${scope.type==='item'&&l.item_id===scope.id?'selected-shipment-line':''}"><td><span class="item-row-number">${N(i+1)}</span></td><td>${E(l.trade_name||l.item_name)}<div class="tiny">${E(l.sku)}</div></td><td>${E(l.batch_no)}<div class="tiny">Lot ${N(l.lot_id)}</div></td><td>${E(l.manufacture_date||'—')}</td><td>${E(l.expiry_date||'—')}</td><td>${l.direction>0?'+':'−'}${N(l.qty)} ${E(l.unit)}</td><td>${priceLabel(l.unit_price_fils)}</td></tr>`);
+ return `<article class="shipment-history-card"><div class="shipment-history-title"><div><strong>${E(m.code)}</strong><span class="tiny">${D(m.created_at)}</span></div>${badge(m.route==='opening_balance'?'رصيد افتتاحي':direction?'إدخال مخزني':'إخراج مخزني',color)}</div><div class="shipment-meta">${documents.map(([k,v])=>`<div><span>${E(k)}</span><strong>${E(v)}</strong></div>`).join('')}${m.paperwork_pending?'<div class="pending-paperwork">Emergency documents pending</div>':''}</div><div class="db-table-wrap">${table(['#','Product','Lot','Manufacture','Expiry','Quantity','Unit price'],lines)}</div>${m.notes?`<p class="shipment-notes">${E(m.notes)}</p>`:''}</article>`;
 }
 async function loadShipmentHistory(offset=0){
  const state=shipmentHistoryScope,el=$('#shipmentHistoryContent');if(!state||!el)return;
@@ -453,7 +460,12 @@ async function loadProfile(){
    ${field('Phone number',`<input name="phone" type="tel" maxlength="35" class="db-input" value="${E(p.phone)}" placeholder="+964 ...">`)}
    ${field('Age',`<input name="age" type="number" min="0" max="120" step="1" class="db-input" value="${p.age==null?'':E(p.age)}">`)}
    ${field('Job title',`<input name="job_title" class="db-input" maxlength="100" value="${E(p.job_title)}" placeholder="Pharmacist / Warehouse employee">`)}
-   </div><button type="submit" class="db-btn">Save my information</button></form><p class="muted-hint profile-help">Your personal contact information is accessible to your account and the system database. Password changes are under Settings.</p>`;
+   </div><button type="submit" class="db-btn">Save my information</button></form>
+  <div class="profile-password"><h3>تغيير كلمة المرور — Change password</h3><form id="passwordForm" class="db-form"><div class="db-grid">
+  ${field('Current password',inp('current_password','','password','required autocomplete="current-password"'))}
+  ${field('New password (8+ characters)',inp('new_password','','password','required minlength="8" autocomplete="new-password"'))}
+  </div><button type="submit" class="db-btn">Update my password</button></form></div>
+  <p class="muted-hint profile-help">Your role, warehouse branch, and username remain administrator-controlled.</p>`;
   window.HWLang?.apply();
  }catch(err){toast(err.message,'error')}
 }
@@ -487,13 +499,13 @@ const issueLine=(includeExpired=false)=>includeExpired
  ? `<div class="ship-line issue legacy-issue" data-issue-line data-allow-expired="1">${field('Select product batch',`<select class="db-select" data-key="batch_id" required>${batchOptions(true)}</select>`)}${field('Quantity',`<input class="db-input" type="number" data-key="qty" min="1" step="1" required placeholder="0">`)}<button class="db-btn danger small" type="button" data-remove-line>×</button></div>`
  : `<div class="ship-line issue-detailed" data-issue-line data-allow-expired="0">
  ${field('Product',`<select class="db-select" data-key="item_id" data-issue-product required>${itemOptions()}</select>${inlineItemButton('issue')}`)}
- ${field('Batch number / lot',`<select class="db-select" data-key="batch_id" data-issue-batch required><option value="">Choose product first</option></select>`)}
- ${field('Expiry date',`<input type="date" class="db-input" data-issue-expiry readonly aria-label="Expiry date of selected lot">`)}
+ ${field('Expiration date — تاريخ الصلاحية',`<select class="db-select" data-issue-expiry-picker required><option value="">اختر الصنف أولاً</option></select>`)}
+ ${field('Batch / lot — الوجبة',`<input type="hidden" data-key="batch_id" data-issue-batch required><input class="db-input" data-issue-batch-display readonly aria-label="Selected batch number"><select class="db-select" data-issue-same-date-lot hidden aria-label="Choose lot for shared expiry date"></select>`)}
  ${field('Quantity',`<input type="number" class="db-input" data-key="qty" data-issue-qty min="1" step="1" required placeholder="0">`)}
  ${field('Price — دينار',`<input type="number" class="db-input" data-key="price_dinars" min="0" max="999999999" step="1" required placeholder="0">`)}
  ${field('Price — فلس',`<input type="number" class="db-input" data-key="price_fils_component" min="0" max="999" step="1" required placeholder="0">`)}
  <button class="db-btn danger small" type="button" data-remove-line aria-label="Remove product">×</button>
- <div class="fefo-line-notice" data-fefo-notice role="status" aria-live="polite" hidden></div></div>`;
+ <div class="fefo-line-notice" data-fefo-notice role="status" aria-live="polite" hidden></div><div class="issue-quantity-warning" data-qty-warning role="alert" hidden></div></div>`;
 // FEFO: first expiring, first out. Expired lots are not issueable.
 const fefoSort=(a,b)=>{
  const ad=a.expiry_date||'9999-12-31',bd=b.expiry_date||'9999-12-31';
@@ -530,6 +542,7 @@ function updateFefoNotices(form=$('#issueForm')){
  for(const line of $$('[data-issue-line].issue-detailed',form)){
   const iid=Number(line.querySelector('[data-issue-product]')?.value||0),lot=cache.batches.find(b=>b.id===Number(line.querySelector('[data-issue-batch]')?.value));
   const message=line.querySelector('[data-fefo-notice]');if(!message)continue;
+  validateIssueQuantity(line);
   if(!iid){message.hidden=true;continue;}
   const lots=eligibleLots(iid),best=lots[0],warning=lot&&selectionWarnings.get(lot.id);
   message.hidden=false;message.className='fefo-line-notice';
@@ -556,29 +569,51 @@ function updateFefoNotices(form=$('#issueForm')){
   `Issue earliest-expiring usable lots first (FEFO). ${urgent.length} usable lot(s) expire within 60 days.`;
  }
 }
+// V4.18: expiry-first selection, with exact lot IDs retained for movements.
+// Two or more lots can share an expiry date but differ in batch and price;
+// the extra lot selector appears only when necessary to prevent ambiguity.
 function syncIssueProduct(line, preferredBatch=null){
- if(!line||!line.matches('.issue-detailed'))return;
- const iid=Number(line.querySelector('[data-issue-product]')?.value||0);
- const opts=eligibleLots(iid);
- const sel=line.querySelector('[data-issue-batch]'),old=preferredBatch==null?Number(sel.value):Number(preferredBatch);
- sel.innerHTML=selectOptions(opts.map((b,i)=>{const days=fefoDateDays(b.expiry_date);
-  const mark=i===0?'★ FEFO · ':'';
-  const near=days!==null&&days<=60?'⚠ ':'';
-  return {value:b.id,label:`${mark}${near}${b.batch_no} · Exp ${b.expiry_date||'unknown'} · ${N(b.on_hand)} ${b.unit} · ${priceLabel(b.unit_price_fils)}`};
- }),'','Select received lot');
- sel.value=opts.some(b=>b.id===old)?String(old):opts.length?String(opts[0].id):'';
- syncIssueBatch(line);window.HWLang?.apply();
+ if(!line?.matches('.issue-detailed'))return;
+ const iid=Number(line.querySelector('[data-issue-product]')?.value||0),lots=eligibleLots(iid);
+ const expirySelect=line.querySelector('[data-issue-expiry-picker]');
+ const former=cache.batches.find(b=>b.id===Number(preferredBatch??line.querySelector('[data-issue-batch]')?.value));
+ const dates=[...new Set(lots.map(b=>b.expiry_date||''))];
+ expirySelect.innerHTML=selectOptions(dates.map(date=>({value:date||'unknown',label:date||'تاريخ الصلاحية غير مسجل'})),'','اختر تاريخ الصلاحية');
+ expirySelect.value=dates.includes(former?.expiry_date||null)?former.expiry_date||'unknown':dates.length?(dates[0]||'unknown'):'';
+ syncIssueExpiry(line,preferredBatch);
+ window.HWLang?.apply();
+}
+function syncIssueExpiry(line,preferredBatch=null){
+ if(!line?.matches('.issue-detailed'))return;
+ const iid=Number(line.querySelector('[data-issue-product]')?.value||0),exp=line.querySelector('[data-issue-expiry-picker]')?.value;
+ const lots=eligibleLots(iid).filter(b=>(b.expiry_date||'unknown')===exp);
+ const exact=line.querySelector('[data-issue-batch]'),same=line.querySelector('[data-issue-same-date-lot]');
+ const chosen=lots.find(b=>b.id===Number(preferredBatch??exact.value))||lots[0];
+ same.hidden=lots.length<=1;
+ same.innerHTML=lots.map(b=>`<option value="${b.id}">${E(b.batch_no)} · ${N(b.on_hand)} ${E(b.unit)} · ${priceLabel(b.unit_price_fils)}</option>`).join('');
+ if(chosen){same.value=String(chosen.id);exact.value=String(chosen.id)}else{exact.value=''}
+ syncIssueBatch(line);
 }
 function syncIssueBatch(line){
- if(!line||!line.matches('.issue-detailed'))return;
+ if(!line?.matches('.issue-detailed'))return;
  const batch=cache.batches.find(b=>b.id===Number(line.querySelector('[data-issue-batch]')?.value));
- const expiry=line.querySelector('[data-issue-expiry]');if(expiry)expiry.value=batch?.expiry_date||'';
- const qty=line.querySelector('[data-issue-qty]');if(qty){qty.max=batch?.on_hand||'';if(batch&&Number(qty.value)>batch.on_hand)qty.value=String(batch.on_hand);}
+ const display=line.querySelector('[data-issue-batch-display]');if(display)display.value=batch?.batch_no||'';
+ const qty=line.querySelector('[data-issue-qty]');if(qty){qty.max=batch?.on_hand??'';}
  const price=batch?.unit_price_fils;
  const d=line.querySelector('[data-key="price_dinars"]'),f=line.querySelector('[data-key="price_fils_component"]');
  if(d)d.value=price==null?'':String(Math.floor(price/1000));
  if(f)f.value=price==null?'':String(price%1000);
  updateFefoNotices();
+}
+function validateIssueQuantity(line){
+ const lot=cache.batches.find(b=>b.id===Number(line?.querySelector('[data-issue-batch]')?.value));
+ const qty=Number(line?.querySelector('[data-issue-qty]')?.value||0);
+ const note=line?.querySelector('[data-qty-warning]');if(!note)return;
+ const tooMuch=!!lot&&qty>lot.on_hand;
+ note.hidden=!tooMuch;
+ if(tooMuch){note.textContent=(fefoAr()?'⚠ الكمية المطلوبة أكبر من الرصيد المتوفر لهذه الوجبة. المتوفر: ':'⚠ Requested quantity exceeds this lot’s available stock: ')+N(lot.on_hand);}
+ if(!tooMuch&&lot&&qty>0){const used=$$('[data-issue-line].issue-detailed',line.closest('form')).filter(l=>l.querySelector('[data-issue-batch]')?.value===String(lot.id)).reduce((a,l)=>a+Number(l.querySelector('[data-issue-qty]')?.value||0),0);
+ if(used>lot.on_hand){note.hidden=false;note.textContent=fefoAr()?`⚠ مجموع الكميات المختارة من هذه الوجبة (${N(used)}) يتجاوز الرصيد (${N(lot.on_hand)}).`:`⚠ Total requested from this lot (${N(used)}) exceeds available stock (${N(lot.on_hand)}).`;}}
 }
 // V4.7 — explicit 4-in / 3-out shipment route selectors.
 function shipmentChoice(name,value,title,desc,checked=false){return `<label class="dest-choice-option"><input type="radio" name="${name}" value="${value}" ${checked?'checked':''}><span><strong>${E(title)}</strong><small>${E(desc)}</small></span></label>`;}
@@ -673,8 +708,8 @@ function syncOutgoingDestination(form){
 
 function returns(){return `${head('Stock adjustments','Department returns are recorded only under Receive Shipments → Internal department return. This tab is for audited stocktaking corrections.')}
 ${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):msg('Read-only','Only managers and administrators with branch permissions can adjust stock.')}`}
-function users(){if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');const rows=cache.users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td>${x.must_change_password?'Temporary':'Updated'}</td><td>${x.id!==user.id?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:'Current account'}</td></tr>`);
-return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',table(['Username / name','Role','Assigned branch','Status','Password','Actions'],rows),'users')}`}
+function users(){if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');const rows=cache.users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">عرض البيانات · Details</button></td><td>${x.id!==user.id?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:'Current account'}</td></tr>`);
+return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',table(['Username / name','Role','Assigned branch','Status','Profile details','Actions'],rows),'users')}`}
 function backup(){return `${head('Database backup and restore','Administrators can download a portable complete snapshot or upload a previously exported file. Account password hashes are included, but active login sessions are excluded.')}
 <div class="db-layout">${panel('Download full backup',`<p class="muted-hint" style="margin-bottom:16px">Includes users, departments, items, batches, requisition references, all movements and audit records. Creates a ZIP with a database snapshot and SHA-256 manifest.</p><button type="button" class="db-btn" id="downloadBackup">${I('download')} Download full database backup</button>`,'backup')}${panel('Restore previously exported backup',`<p class="muted-hint" style="margin-bottom:15px">This replaces ALL current records with the uploaded snapshot. A safety copy is automatically saved to the server first.</p><form id="restoreForm" class="db-form">${field('Upload warehouse backup ZIP',`<input name="backup" type="file" class="db-input" accept=".zip" required>`)}${field('Type RESTORE to confirm',inp('confirmation','RESTORE','text','required autocomplete="off"'))}<button class="db-btn danger" type="submit">${I('upload')} Validate and restore backup</button></form>`,'backup')}</div><div class="db-note warn">Important: restoration can remove transactions created after the selected backup. It also signs out all staff. Download and store backups securely; this testing build has manual backup only.</div>`}
 function reports(){const low=cache.items.filter(x=>x.active&&x.min_stock>0&&x.stock<x.min_stock);const dist=cache.movements.filter(x=>x.kind==='OUT');const total=dist.length;
@@ -740,16 +775,15 @@ function filterStatement(){
  const count=$('#statementShown');if(count)count.textContent=`${N(rows.length)} of ${N(matched.length)} items · ${N(data.length)} matching records`;
  window.HWLang?.apply();
 }
-function settings(){return `${head('Settings and account security','Update your own password. Management can also review a separate audit trail.')}
-${panel('Change your password',`<form id="passwordForm" class="db-form" style="max-width:530px"><div class="db-grid">${field('Current password',inp('current_password','','password','required autocomplete="current-password"'))}${field('New password (8+ characters)',inp('new_password','','password','required minlength="8" autocomplete="new-password"'))}</div><button type="submit" class="db-btn" style="justify-self:start">Update password</button></form>`,'lock')}
-${can('item_write')?panel('Operations audit trail',`<div id="auditLog">Loading events...</div>`,'history'):''}`}
+function settings(){if(user?.role!=='admin')return msg('Access denied','Only administrators can view audit logs.');return `${head('سجل التدقيق — Audit logs','Administrator-only log of application activity, account changes and stock operations.')}
+${panel('سجل التدقيق — Operations audit trail',`<div id="auditLog">Loading events...</div>`,'history')}`}
 const pages={overview,inventory,item_movement:itemMovements,profile:profilePage,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
 function showPage(next){
  if(next==='batches')next='inventory';
- if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup')))next='overview';
+ if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup'))||(next==='settings'&&user.role!=='admin'))next='overview';
  closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
  $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
- if(next==='settings'&&can('item_write'))loadAudit();if(next==='profile')loadProfile();
+ if(next==='settings'&&user?.role==='admin')loadAudit();if(next==='profile')loadProfile();
  window.scrollTo({top:0,behavior:'instant'});
 }
 function route(next){location.hash=next;showPage(next)}
@@ -810,7 +844,7 @@ function editItem(it=null){
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.17</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.18</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
  syncOpeningBalanceFields(form);
  window.HWLang?.apply();
@@ -968,7 +1002,23 @@ function completeMovementPapers(m){
 }
 document.addEventListener('click',async e=>{
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
- const expand=e.target.closest('[data-expand-item]');if(expand){const id=Number(expand.dataset.expandItem),detail=document.querySelector(`[data-detail-row="${id}"]`);if(detail){detail.hidden=!detail.hidden;if(!detail.hidden&&!detail.querySelector('.expanded-item-panel')){const it=itemById(id);if(it)detail.querySelector('td').innerHTML=fullItemPanel(it,lotStats(it));}$$(`[data-expand-item="${id}"]`).forEach(btn=>{btn.setAttribute('aria-expanded',String(!detail.hidden));if(btn.classList.contains('expand-row-btn'))btn.textContent=detail.hidden?'▾':'▴';else btn.textContent=detail.hidden?'View lots ▾':'Hide lots ▴';});if(detail.hidden)expandedItems.delete(id);else expandedItems.add(id);}return;}
+ const expand=e.target.closest('[data-expand-item]');if(expand){
+  const id=Number(expand.dataset.expandItem),detail=document.querySelector(`[data-detail-row="${id}"]`);
+  if(detail){
+   const opening=detail.hidden;
+   detail.hidden=!opening;
+   if(opening){
+    expandedItems.add(id);expandedFullInfo.delete(id);
+    const it=itemById(id);
+    if(it)detail.querySelector('td').innerHTML=fullItemPanel(it,lotStats(it));
+   }else{expandedItems.delete(id);expandedFullInfo.delete(id);}
+   $$(`[data-expand-item="${id}"]`).forEach(btn=>{btn.setAttribute('aria-expanded',String(opening));if(btn.classList.contains('expand-row-btn'))btn.textContent=opening?'▴':'▾';});
+  }return;
+ }
+ const extra=e.target.closest('[data-toggle-item-extra]');if(extra){
+  const id=Number(extra.dataset.toggleItemExtra),panel=document.getElementById(`item-extra-${id}`);
+  if(panel){const opening=panel.hidden;panel.hidden=!opening;if(opening)expandedFullInfo.add(id);else expandedFullInfo.delete(id);extra.setAttribute('aria-expanded',String(opening));const arrow=extra.querySelector('.expanded-extra-chevron');if(arrow)arrow.textContent=opening?'▴':'▾';}return;
+ }
  const colOpen=e.target.closest('[data-open-column-manager]');if(colOpen){openColumnManager(colOpen.dataset.openColumnManager);return;}
  if(e.target.closest('[data-close-column-manager]')){closeColumnManager();return;}
  if(e.target.closest('[data-column-all]')){columnChangeAll('all');return;}
@@ -1004,9 +1054,13 @@ document.addEventListener('click',async e=>{
  const item=e.target.closest('[data-edit-item]');if(item){editItem(cache.items.find(x=>x.id===Number(item.dataset.editItem)));return}
  const dep=e.target.closest('[data-edit-dept]');if(dep){editDept(cache.departments.find(x=>x.id===Number(dep.dataset.editDept)));return}
  const uu=e.target.closest('[data-edit-user]');if(uu){editUser(cache.users.find(x=>x.id===Number(uu.dataset.editUser)));return}
+ const detail=e.target.closest('[data-user-details]');if(detail){try{const u=await api('/api/users/'+Number(detail.dataset.userDetails)+'/profile');modalOpen('بيانات الموظف — Staff profile','Read-only information supplied by this employee.',
+ `<div class="staff-profile-details">${[['Username',u.username],['Full name',u.full_name],['Branch',u.branch||'All branches'],['Role',u.role],['Email',u.email],['Phone',u.phone],['Age',u.age],['Job title',u.job_title]].map(([name,value])=>`<div><span>${E(name)}</span><strong>${E(value??'—')}</strong></div>`).join('')}</div>`,'staff-readonly','Close');const readOnly=$('#entityForm');if(readOnly){readOnly.id='staffReadOnlyProfile';readOnly.querySelector('[type=submit]')?.remove();}}catch(err){toast(err.message,'error')}return;}
  const reset=e.target.closest('[data-reset-user]');if(reset){resetUser(cache.users.find(x=>x.id===Number(reset.dataset.resetUser)));return}
+ if(e.target.closest('[data-close-notifications]')||e.target.id==='notificationModal'){closeNotifications();return;}
+ const notifGo=e.target.closest('[data-notif-go]');if(notifGo){closeNotifications();route(notifGo.dataset.notifGo);return;}
  if(e.target.closest('[data-close-modal]')){if($('#entityForm')?.dataset.entity?.startsWith('quickreceipt:'))toast('Item saved, but it cannot be issued until incoming stock is recorded.','error');modalClose();inlineNewItem=null;return}
- const priority=e.target.closest('[data-fefo-pick]');if(priority){const line=priority.closest('[data-issue-line]');const select=line?.querySelector('[data-issue-batch]');if(select){select.value=priority.dataset.fefoPick;syncIssueBatch(line);}return;}
+ const priority=e.target.closest('[data-fefo-pick]');if(priority){const line=priority.closest('[data-issue-line]');const select=line?.querySelector('[data-issue-batch]');if(select){const preferred=Number(priority.dataset.fefoPick);const lot=cache.batches.find(b=>b.id===preferred);const expiry=line.querySelector('[data-issue-expiry-picker]');if(expiry)expiry.value=lot?.expiry_date||'unknown';syncIssueExpiry(line,preferred);}return;}
  if(e.target.closest('[data-remove-line]')){const line=e.target.closest('.ship-line');const parent=line.parentElement;if(parent.children.length>1)line.remove();else toast('At least one line is required','error');updateFefoNotices();return}
  const add=e.target.closest('[data-add]');if(add){const type=add.dataset.add;if(type==='receive'){$('#receiptLines').insertAdjacentHTML('beforeend',$('#receiptLines').dataset.returnMode==='1'?issueLine(true):receiveLine());}else $(`#${type==='issue'?'issueLines':'adjustLines'}`).insertAdjacentHTML('beforeend',issueLine(type!=='issue'));return}
  if(e.target.closest('#downloadBackup')){downloadBackup();return}
@@ -1062,7 +1116,8 @@ document.addEventListener('change',async e=>{
  }
  if(e.target.id==='statementPercentInput'){try{await applyStatementPercent()}catch(err){toast(err.message,'error')}}
  if(e.target.matches('[data-issue-product]'))syncIssueProduct(e.target.closest('[data-issue-line]'));
- if(e.target.matches('[data-issue-batch]'))syncIssueBatch(e.target.closest('[data-issue-line]'));
+ if(e.target.matches('[data-issue-expiry-picker]'))syncIssueExpiry(e.target.closest('[data-issue-line]'));
+ if(e.target.matches('[data-issue-same-date-lot]')){const line=e.target.closest('[data-issue-line]');line.querySelector('[data-issue-batch]').value=e.target.value;syncIssueBatch(line);}
  if(e.target.id==='movementType')filterMovements();
  if(e.target.id==='itemBranchFilter') { const filter=$('#itemBookFilter');if(filter){filter.innerHTML=filterBookOptions(e.target.value);filter.value=''}filterInventory(); }
  if(e.target.id==='itemBookFilter')filterInventory();
@@ -1082,10 +1137,29 @@ function syncUserBranchField(form){
 
 function filterMovements(){const q=($('#movementFilter')?.value||'').toLowerCase(),t=$('#movementType')?.value||'';
  const results=cache.movements.filter(x=>(!t||x.kind===t)&&JSON.stringify(x).toLowerCase().includes(q));$('#movementResults').innerHTML=table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(results));}
+
+function openNotifications(){
+ const root=$('#notificationModal');if(!root)return;
+ const today=todayBaghdad();const lots=cache.batches.filter(b=>b.on_hand>0&&b.item_active&&b.expiry_date);
+ const expired=lots.filter(b=>b.expiry_date<today).sort(fefoSort);
+ const near=lots.filter(b=>b.expiry_date>=today&&fefoDateDays(b.expiry_date)<=60).sort(fefoSort);
+ const pending=cache.movements.filter(m=>m.paperwork_pending);
+ const empty=cache.items.filter(it=>it.active&&lotStats(it).physical<=0);
+ const card=(name,arr,action,limit=5)=>`<section class="notification-section"><header><strong>${E(name)}</strong><span class="notification-count">${N(arr.length)}</span></header><div class="notification-list">${arr.length?arr.slice(0,limit).map(action).join(''):'<p class="muted-hint">لا توجد تنبيهات حالياً · None</p>'}</div></section>`;
+ root.innerHTML=`<div class="notification-dialog" role="dialog" aria-modal="true" aria-labelledby="notificationTitle"><div class="notification-header"><div><h2 id="notificationTitle">التنبيهات الرئيسية · Notifications</h2><p class="muted-hint">ملخص مهمات المخزن — key warehouse alerts</p></div><button class="db-btn secondary small" type="button" data-close-notifications>إغلاق ×</button></div><div class="notification-grid">
+ ${card('مواد منتهية الصلاحية · Expired lots',expired,b=>`<div>${E(b.item_name)} · ${E(b.expiry_date)} · ${N(b.on_hand)}</div>`)}
+ ${card('مواد قريبة النفاذ · Expiring in 60 days',near,b=>`<div>${E(b.item_name)} · ${E(b.expiry_date)} · ${N(b.on_hand)}</div>`)}
+ ${card('مواد مفقودة · No stock',empty,it=>`<div>${E(it.trade_name||it.name)} · ${E(branchName(it.branch))}</div>`)}
+ ${card('أوراق طلبية ناقصة · Pending paperwork',pending,m=>`<div>${E(m.code)} · ${E(m.paper_ref||'—')}</div>`)}
+ </div><div class="notification-footer"><button class="db-btn secondary" type="button" data-notif-go="positions">عرض المواقف</button><button class="db-btn secondary" type="button" data-notif-go="movements">سجل الحركات</button></div></div>`;
+ root.classList.add('open');root.setAttribute('aria-hidden','false');root.querySelector('[data-close-notifications]')?.focus();window.HWLang?.apply();
+}
+function closeNotifications(){const root=$('#notificationModal');if(!root)return;root.classList.remove('open');root.setAttribute('aria-hidden','true');root.innerHTML=''}
+
 $('#menuButton').addEventListener('click',()=>{$('#sidebar').classList.toggle('open');$('#dimOverlay').classList.toggle('show')});
 $('#dimOverlay').addEventListener('click',closeMenu);
 $('#accountButton').addEventListener('click',()=>{$('#accountMenu').classList.toggle('open');$('#accountButton').setAttribute('aria-expanded',$('#accountMenu').classList.contains('open'))});
-$('#notifBtn').addEventListener('click',()=>toast(`${cache.dashboard?.low_stock||0} low-stock items · ${cache.dashboard?.expiry_soon||0} expiring batches`));
+$('#notifBtn').addEventListener('click',()=>openNotifications());
 $('#logoutButton').addEventListener('click',async()=>{try{await api('/api/logout',{method:'POST'});location.href='/login.html'}catch(e){toast(e.message,'error')}});
 $('#globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){route('inventory');$('#itemFilter').value=e.target.value;$('#itemFilter').dispatchEvent(new Event('input',{bubbles:true}))}});
 $('#entityModal').addEventListener('click',e=>{if(e.target.id==='entityModal')modalClose()});
@@ -1102,13 +1176,13 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'||e.key===' '){selectDepartment(picker,option);e.preventDefault();return;}
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){const matches=[...picker.querySelectorAll('[data-dept-option]')].filter(el=>!el.hidden);const i=matches.indexOf(option);matches[Math.max(0,Math.min(matches.length-1,i+(e.key==='ArrowDown'?1:-1)))]?.focus();e.preventDefault();return;}
  }
- if(e.key==='Escape'){closeShipmentHistory();modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
+ if(e.key==='Escape'){closeNotifications();closeShipmentHistory();modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
 (async function boot(){try{
  user=await api('/api/me');csrf=user.csrf;
  $('#userName').textContent=user.full_name;$('#userRole').textContent=user.role[0].toUpperCase()+user.role.slice(1);
  if(!can('users'))$$('[data-view="users"]').forEach(x=>x.style.display='none');
  if(!can('backup'))$$('[data-view="backup"]').forEach(x=>x.style.display='none');
- if(!can('item_write'))$$('[data-view="settings"]').forEach(x=>x.style.display='');
+ if(user.role!=='admin')$$('[data-view="settings"]').forEach(x=>x.style.display='');
  await refreshData();showPage(location.hash.slice(1)||'overview');
 }catch(e){$('#dashboardView').innerHTML=msg('Database unavailable',e.message);toast(e.message,'error')}})();
 

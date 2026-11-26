@@ -6,7 +6,7 @@ from department_catalog import DEFAULT_DEPARTMENTS
 with tempfile.TemporaryDirectory() as tmp:
     os.environ['WAREHOUSE_DATA_DIR'] = tmp
     from app import app, DB, init_db, SCHEMA_VERSION, APP_RELEASE
-    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.17.0'
+    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.19.0'
     with TestClient(app) as t:
         def good(r):
             assert r.status_code == 200, (r.status_code, r.text)
@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as tmp:
         deps=good(t.get('/api/departments'))
         assert len(deps)==60 and 'وحدة المفراس' not in {x['name'] for x in deps}
         assert next(m for m in good(t.get('/api/movements')) if m['id']==issue['id'])['lines'][0]['unit_price_fils']==1350500
-        assert good(t.get('/api/health'))['release']=='4.17.0'
+        assert good(t.get('/api/health'))['release']=='4.19.0'
         js=good(t.get('/api/health'))
         assert js['version']==9
         html=t.get('/static/live.js').text

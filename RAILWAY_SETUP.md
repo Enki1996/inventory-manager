@@ -1,3 +1,8 @@
+## V4.19 upgrade note
+This release changes interface code only. Schema remains **9**. Redeploy to the same service, retain `/data`, and check `/api/health` reports `4.19.0`. Do not restore or replace the database for this update.
+
+**V4.18: no database migration. Keep the existing `/data` volume attached. Back up current records before deploying.**
+
 # Hospital Warehouse IMS V4.15 — Railway deployment
 
 ## Already online: update your EXISTING service

@@ -1,3 +1,9 @@
+## V4.19 update
+See `V4_19_CHANGES.md` for numbered item lists, nested item details, and deployment instructions. Use the same Railway service and existing persistent database volume. This ZIP contains no database.
+
+## V4.18 update
+See `V4_18_CHANGES.md` for account, audit log, notification dialog, and expiry-first outgoing changes. Deploy to the **same** Railway service with the existing `/data` volume attached. This ZIP contains **code only**, not a database.
+
 # Hospital Warehouse IMS — V4.17
 
 Arabic-first bilingual, single-warehouse inventory web app with role and branch permissions, multiple batches/expiry dates/prices, receiving and distribution, FEFO stock-issuing recommendations, full movement history, 59 preloaded departments, inventory inspection, warehouse statements, and administrator backup/restore.

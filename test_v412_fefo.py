@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as tmp:
     os.environ['WAREHOUSE_DATA_DIR'] = tmp
     from app import app, SCHEMA_VERSION, APP_RELEASE
-    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.17.0'
+    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.19.0'
     with TestClient(app) as c:
         def ok(r):
             assert r.status_code==200,(r.status_code,r.text)
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
         after={x['batch_no']:x['on_hand'] for x in ok(c.get('/api/batches')) if x['item_id']==med and x['on_hand']>0}
         assert after=={'LATE':4},after
         health=ok(c.get('/api/health'))
-        assert health['release']=='4.17.0' and health['version']==9
+        assert health['release']=='4.19.0' and health['version']==9
         frontend= c.get('/static/live.js').text
         assert 'eligibleLots' in frontend and 'fefoWarningDetails' in frontend and 'fefo_override_reason' in frontend
         assert 'data-fefo-notice' in frontend and 'data-fefo-summary' in frontend

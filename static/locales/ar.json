@@ -281,7 +281,7 @@
   "Update your own password. Management can also review a separate audit trail.": "غيّر كلمة مرور حسابك وراجع سجل التدقيق إذا كانت لديك الصلاحيات.",
   "Change your password": "تغيير كلمة المرور",
   "Current password": "كلمة المرور الحالية",
-  "New password (8+ characters)": "كلمة المرور الجديدة (٨ أحرف فأكثر)",
+  "New password (8+ characters)": "كلمة المرور الجديدة (٨ أحرف على الأقل)",
   "Update password": "تحديث كلمة المرور",
   "Operations audit trail": "سجل تدقيق العمليات",
   "Loading events...": "جارٍ تحميل الأحداث...",
@@ -750,5 +750,14 @@
   "Maintain your own employee contact information. Role, login name and assigned branch remain administrator-controlled.": "يمكنك تعديل بياناتك الشخصية، بينما تبقى الصلاحيات والفرع واسم الدخول من اختصاص المدير.",
   "Your personal contact information is accessible to your account and the system database. Password changes are under Settings.": "تبقى بيانات التواصل محفوظة في النظام. لتغيير كلمة المرور افتح الإعدادات.",
   "All stored lots": "جميع الوجبات المخزنية",
-  "Email address": "البريد الإلكتروني"
+  "Email address": "البريد الإلكتروني",
+  "Audit logs": "سجل التدقيق",
+  "Show my account": "عرض الملف الشخصي",
+  "Update my password": "تحديث كلمة المرور",
+  "Profile details": "بيانات الملف الشخصي",
+  "Expiration date — تاريخ الصلاحية": "تاريخ الصلاحية",
+  "Batch / lot — الوجبة": "رقم الوجبة",
+  "Full item information & movement history": "التفاصيل الكاملة للصنف وسجل الحركات",
+  "Expand stored lots": "عرض الوجبات المخزنة",
+  "View item details": "عرض تفاصيل الصنف"
 }
