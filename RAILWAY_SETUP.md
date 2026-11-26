@@ -1,15 +1,15 @@
-# Hospital Warehouse IMS V4.12 — Railway deployment
+# Hospital Warehouse IMS V4.15 — Railway deployment
 
 ## Already online: update your EXISTING service
 
 1. Create and download a current backup using **Backup & Restore**. Store it privately.
 2. Confirm your existing Railway service has a persistent volume mounted at `/data`, and the environment variable `WAREHOUSE_DATA_DIR=/data`.
-3. Extract `Hospital_Warehouse_IMS_V4_12_Annual_Need_Statements_Railway.zip` and commit its **source files**, not the ZIP itself, to the **same private GitHub repository**.
+3. Extract `Hospital_Warehouse_IMS_V4_15_Monthly_Statements_Railway.zip` and commit its **source files**, not the ZIP itself, to the **same private GitHub repository**.
 4. Redeploy/update the **same Railway service**. **Do not detach, delete or reset `/data`**, and do not create a new service/database for an ordinary code update.
-5. Open `/api/health` on your Railway URL. Expected fields: `"ok":true`, `"release":"4.12.0"`, `"version":8`.
-6. Verify your older departments, accounts, stock and movements are still present, then test one new item's **كمية الاحتياج السنوي**, the custom cutoff date, and a scarce/surplus percentage.
+5. Open `/api/health` on your Railway URL. Expected fields: `"ok":true`, `"release":"4.15.0"`, `"version":8`.
+6. Verify your older departments, accounts, stock and movements are still present, then test the 20% scarce and 120% surplus monthly defaults, a custom percentage and the reset control.
 
-V4.12 applies a non-destructive SQLite migration that adds the optional `items.annual_need` column. Existing items' values remain unset until entered. Earlier backups are still supported by the restore function, subject to its existing access controls and safety confirmation.
+V4.15 uses existing `items.annual_need` values and derives monthly need on the fly. No schema changes, database reset or restore are required. Earlier backups remain supported by the existing restore logic and safety controls.
 
 ## New deployments (only if necessary)
 
@@ -36,3 +36,12 @@ This application is for collaborative testing. It does not yet have the security
 This is a frontend/read-only API update. Keep the existing Railway application service and `/data` persistent volume. No database migration is required; `schema version = 8`. Verify `/api/health` includes `"release":"4.14.0"`.
 
 See V4_14_CHANGES.md for the latest UI fixes.
+
+
+## V4.15 deployment
+Keep the same Railway service and `/data` volume. Schema is still **V8**. `/api/health` must report `"release":"4.15.0"`. See `V4_15_CHANGES.md`.
+
+
+## V4.16 opening balance update
+
+This update uses the existing schema V8. It only adds application logic and the optional opening-stock fields. Keep the same Railway service and persistent `/data` volume; do **not** overwrite or upload a database file during the code deployment. Make a backup first. Check `/api/health` for `release: 4.16.0`. See `V4_16_CHANGES.md`.

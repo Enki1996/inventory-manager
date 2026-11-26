@@ -62,8 +62,12 @@
     if(m)return `${m[1]} وجبة قريبة النفاذ قبل ${m[2]}`;
     m=s.match(/^([\d,]+) items with no stock$/);
     if(m)return `${m[1]} صنف بدون رصيد`;
+    m=s.match(/^([\d,]+) items (below|above) ([\d.]+)% of monthly need$/);
+    if(m)return `${m[1]} صنف ${m[2]==='below'?'أقل من':'أكثر من'} ${m[3]}٪ من الاحتياج الشهري`;
     m=s.match(/^([\d,]+) items (below|above) ([\d.]+)%$/);
     if(m)return `${m[1]} صنف ${m[2]==='below'?'أقل من':'أكثر من'} ${m[3]}٪`;
+    m=s.match(/^Monthly need = annual need ÷ 12\. Scarce: below ([\d.]+)%\. Surplus: above ([\d.]+)%\.$/);
+    if(m)return `الاحتياج الشهري = الاحتياج السنوي ÷ 12. الشحيحة: أقل من ${m[1]}٪، والفائضة: أكثر من ${m[2]}٪.`;
     m=s.match(/^([0-9]+) item\(s\) under the reorder threshold/);
     if(m)return s.replace(' item(s) under the reorder threshold',' صنف دون حد التنبيه');
     return original;

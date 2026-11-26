@@ -1,4 +1,4 @@
-/* Live V4.14 bilingual warehouse application: all changes go through the server and SQLite database. */
+/* Live V4.16 bilingual warehouse application: all stock, including opening balances, is audited. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -12,7 +12,8 @@ const badge = (label,kind='neutral')=>`<span class="pill ${kind}">${E(label)}</s
 const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E(title)}</strong><span class="muted-hint">${E(sub)}</span></div>`;
 let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,positions:null,books:{},units:{},staff:[]}, toastTimer;
 let inlineNewItem=null; // Pending shipment line; kept intact while the item modal is open.
-let statementExpiryBefore='', statementScarcePct='', statementSurplusPct='';
+const DEFAULT_SCARCE_PERCENT='20', DEFAULT_SURPLUS_PERCENT='120';
+let statementExpiryBefore='', statementScarcePct=DEFAULT_SCARCE_PERCENT, statementSurplusPct=DEFAULT_SURPLUS_PERCENT;
 // V4.13: filters and selected table columns are presentation-only. Data is unchanged.
 const expandedItems=new Set();
 let inventoryState='available', inventorySort='name', inventoryInactive=false;
@@ -21,13 +22,13 @@ const COLS=[
  ['name','Item / Product'],['branch','Warehouse branch'],['book','Registered book'],
  ['unit','Unit'],['physical','Physical balance'],['usable','Usable balance'],
  ['expired','Expired balance'],['unknown','Unknown expiry'],['lots','Stored lots'],
- ['next','Nearest usable expiry'],['price','Registered price'],['annual','Annual requirement'],
+ ['next','Nearest usable expiry'],['price','Registered price'],['annual','Annual requirement'],['monthly','Monthly requirement'],
  ['manufacturer','Manufacturer'],['mfg','Manufacture date'],['generic','Generic name'],
  ['aliases','Alternative names'],['reference','Reference batch / expiry'],
- ['status','Item status'],['percent','% annual need'],['matched','Matching expiry lots'],['actions','Edit']
+ ['status','Item status'],['percent','% monthly need'],['matched','Matching expiry lots'],['actions','Edit']
 ];
 const DEFAULT_INV_COLS=['name','branch','book','physical','usable','lots','next','price','annual','actions'];
-const DEFAULT_STMT_COLS=['name','branch','book','physical','usable','lots','next','price','annual','matched','percent'];
+const DEFAULT_STMT_COLS=['name','branch','book','physical','usable','lots','next','price','annual','monthly','matched','percent'];
 const storedColumnState=(section,defaults)=>{
  try{const raw=JSON.parse(localStorage.getItem('hw_columns_'+section));if(Array.isArray(raw)&&raw.length)return raw.filter(k=>COLS.some(c=>c[0]===k));}catch(_e){}
  return [...defaults];
@@ -119,6 +120,7 @@ function itemColumn(it,stat,key,context){
   case 'next':return E(stat.next||'—');
   case 'price':return priceLabel(it.price_fils);
   case 'annual':return it.annual_need==null?'—':`${N(it.annual_need)} ${E(it.unit)}`;
+  case 'monthly':return it.annual_need==null?'—':`${(Number(it.annual_need)/12).toLocaleString('en-US',{maximumFractionDigits:2})} ${E(it.unit)}`;
   case 'manufacturer':return E(it.manufacturer||'—');
   case 'mfg':return E(it.manufacture_date||'—');
   case 'generic':return E(it.generic_name||'—');
@@ -137,6 +139,7 @@ function fullItemPanel(it,stat){
   ['Unit',it.unit],['Manufacturer',it.manufacturer],['Manufacture date',it.manufacture_date],
   ['Reference batch',it.initial_batch_no],['Reference expiry',it.expiry_date],
   ['Registered price',priceLabel(it.price_fils)],['Annual requirement',it.annual_need==null?'—':`${N(it.annual_need)} ${it.unit}`],
+  ['Monthly requirement',it.annual_need==null?'—':`${(Number(it.annual_need)/12).toLocaleString('en-US',{maximumFractionDigits:2})} ${it.unit}`],
   ['Other names / information',it.information],['Record created',it.created_at],['Record status',it.active?'Active':'Inactive'],
   ['Total stock',`${N(stat.physical)} ${it.unit}`],['Usable / unexpired',`${N(stat.usable)} ${it.unit}`],
   ['Expired stock',`${N(stat.expired)} ${it.unit}`],['No expiry recorded',`${N(stat.unknown)} ${it.unit}`]];
@@ -166,7 +169,7 @@ async function loadItemHistory(itemId,offset=0){
  const btn=holder.querySelector('[data-load-item-history]');if(btn){btn.disabled=true;btn.textContent='Loading…';}
  try{
   const result=await api(`/api/items/${itemId}/history?limit=50&offset=${offset}`);
-  const rows=result.rows.map(m=>`<tr><td>${D(m.created_at)}</td><td><strong>${E(m.code)}</strong><div class="tiny">${E(m.kind)} · ${E(routeNames[m.route]||m.route)}</div></td><td>${E(m.paper_ref||'—')}${m.dispatch_ref?`<div class="tiny">${E(m.dispatch_ref)}</div>`:''}</td><td>${E(m.batch_no)}</td><td>${E(m.expiry_date||'—')}</td><td>${m.direction>0?'+':'−'}${N(m.qty)}</td><td>${priceLabel(m.unit_price_fils)}</td><td>${E(m.operator)}</td></tr>`);
+  const rows=result.rows.map(m=>`<tr><td>${D(m.created_at)}</td><td><strong>${E(m.code)}</strong><div class="tiny">${E(m.route==='opening_balance'?'Opening balance':m.kind)} · ${E(routeNames[m.route]||m.route)}</div></td><td>${E(m.paper_ref||'—')}${m.dispatch_ref?`<div class="tiny">${E(m.dispatch_ref)}</div>`:''}</td><td>${E(m.batch_no)}</td><td>${E(m.expiry_date||'—')}</td><td>${m.direction>0?'+':'−'}${N(m.qty)}</td><td>${priceLabel(m.unit_price_fils)}</td><td>${E(m.operator)}</td></tr>`);
   if(offset===0){holder.innerHTML=`<p class="muted-hint">${N(result.total)} recorded line(s)</p><div class="db-table-wrap"><table class="db-table history-table"><thead><tr>${['Date','Movement','Document','Batch','Expiry','Quantity','Price','By'].map(x=>`<th>${E(x)}</th>`).join('')}</tr></thead><tbody data-history-body>${rows.join('')}</tbody></table></div>`;}
   else holder.querySelector('[data-history-body]')?.insertAdjacentHTML('beforeend',rows.join(''));
   if(result.total===0){holder.innerHTML=msg('No movements yet','Creating an item does not add warehouse stock.');return;}
@@ -237,6 +240,7 @@ const filterBookOptions = (branch='', selected='') => {
 };
 
 const typeLabel = {IN:'Warehouse intake',OUT:'Warehouse dispatch',RETURN:'Internal return',ADJUST_PLUS:'Stock increase',ADJUST_MINUS:'Stock decrease'};
+const movementLabel=m=>m.route==='opening_balance'?'Opening balance':(typeLabel[m.kind]||m.kind);
 const movementBadgeType={IN:'intake',OUT:'dispatch',RETURN:'return-type',ADJUST_PLUS:'adjustment',ADJUST_MINUS:'adjustment'};
 async function api(path,{method='GET',data,headers={},body}={}){
   let h={...headers}; if(method!=='GET')h['X-CSRF-Token']=csrf;
@@ -341,13 +345,13 @@ function filterInventory(){
  window.HWLang?.apply();
 }
 function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.name)}</strong></td><td>${badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td>${can('department_write')?`<div class="db-small-actions"><button data-edit-dept="${it.id}">Edit</button></div>`:'—'}</td></tr>`)}
-const routeNames={department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
+const routeNames={opening_balance:'Opening balance',department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
 function movementRows(movements){return movements.map(m=>{
  const pending=m.paperwork_pending===1;
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,movementBadgeType[m.kind]||'neutral')}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
+ return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'intake':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
 })}
 
 function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
@@ -610,18 +614,18 @@ function warehouseStatements(){
  const isMissing=statementMode==='missing',isExpiry=statementMode==='near_expiry',isPercent=!isMissing&&!isExpiry;
  const threshold=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
  const options=[
- {key:'scarce',name:'Scarce materials',icon:'warning',desc:!statementScarcePct?'Enter a percentage to calculate':`${N(info.scarce?.length||0)} items below ${statementScarcePct}%`},
+ {key:'scarce',name:'Scarce materials',icon:'warning',desc:`${N(info.scarce?.length||0)} items below ${statementScarcePct}% of monthly need`},
  {key:'missing',name:'Missing materials',icon:'package',desc:`${N(info.missing.length)} items with no stock`},
- {key:'surplus',name:'Surplus materials',icon:'packages',desc:!statementSurplusPct?'Enter a percentage to calculate':`${N(info.surplus?.length||0)} items above ${statementSurplusPct}%`},
+ {key:'surplus',name:'Surplus materials',icon:'packages',desc:`${N(info.surplus?.length||0)} items above ${statementSurplusPct}% of monthly need`},
  {key:'near_expiry',name:'Materials nearing expiry',icon:'calendar',desc:`${N(info.near_expiry.length)} expiring lots before ${info.expiry_before||'—'}`}
  ];
  const cards=options.map(o=>`<button type="button" class="statement-card ${o.key===statementMode?'chosen':''}" data-statement="${o.key}"><span class="statement-card-icon">${I(o.icon)}</span><strong>${E(o.name)}</strong><span>${E(o.desc)}</span><small class="statement-open">View statement</small></button>`).join('');
  const heading={scarce:'Scarce materials',surplus:'Surplus materials',missing:'Missing materials',near_expiry:'Materials nearing expiry'}[statementMode];
  const explanation=isMissing?'Registered items without any warehouse stock, including those never received.':isExpiry?
  `Available lots expiring from ${info.as_of||'—'} through ${info.expiry_last_included||'—'}. Expand items to inspect all other lots.`:
- 'Percentage of annual requirement is based on dated, unexpired lots; lots without expiry dates are excluded.';
+ 'Monthly requirement = annual requirement ÷ 12. Only usable, dated, unexpired lots count toward the stock percentage.';
  const expiryControl=isExpiry?`<div class="statement-param-row"><label class="db-field statement-control"><span>Expiry before (exclusive)</span><input class="db-input" type="date" id="statementExpiryBefore" value="${E(info.expiry_before||'')}" min="1900-01-01" max="2200-12-31" required></label><button type="button" class="db-btn secondary small" data-reset-statement-expiry>Use default expiry period</button><span class="muted-hint">The selected cutoff date is excluded.</span></div>`:'';
- const percentControl=isPercent?`<div class="statement-param-row"><label class="db-field statement-control"><span>Annual requirement threshold (%)</span><input id="statementPercentInput" class="db-input" inputmode="decimal" type="number" min="0.01" max="1000" step="0.01" placeholder="Enter percentage, e.g. 25" value="${E(threshold)}"></label><button type="button" class="db-btn small" data-apply-statement-percent>Calculate statement</button><span class="muted-hint">Scarce: below selected percent. Surplus: above selected percent. No preset threshold.</span></div>`:'';
+ const percentControl=isPercent?`<div class="statement-param-row"><label class="db-field statement-control"><span>Monthly requirement threshold (%)</span><input id="statementPercentInput" class="db-input" inputmode="decimal" type="number" min="0.01" max="1000" step="0.01" placeholder="Enter custom percentage" value="${E(threshold)}"></label><button type="button" class="db-btn small" data-apply-statement-percent>Calculate statement</button><button type="button" class="db-btn secondary small" data-reset-statement-percent>Use default percentage</button><span class="muted-hint">Monthly need = annual need ÷ 12. Scarce: below ${E(statementMode==='scarce'?threshold:DEFAULT_SCARCE_PERCENT)}%. Surplus: above ${E(statementMode==='surplus'?threshold:DEFAULT_SURPLUS_PERCENT)}%.</span></div>`:'';
  const records=info[statementMode]||[],unique=new Set(records.map(r=>r.item_id)).size;
  return `${head('Warehouse Statements','Detailed reports with configurable columns; expand any item for all its batches, expiry dates, prices and movements.')}
  <div class="statement-grid">${cards}</div><div class="db-panel statement-results">
@@ -640,14 +644,13 @@ function filterStatement(){
  const el=$('#statementTable');if(!el)return;
  const info=cache.positions||{missing:[],near_expiry:[],scarce:[],surplus:[]};
  const threshold=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
- if(statementMode!=='near_expiry'&&statementMode!=='missing'&&!threshold){el.innerHTML=msg('Enter a percentage to calculate','No fixed threshold is applied until you enter one.');return;}
  const data=info[statementMode]||[],q=normalizeItemSearch($('#statementSearch')?.value||'');
  const branch=$('#statementBranch')?.value||'',book=$('#statementBook')?.value||'';
  const sort=$('#statementSort')?.value||statementSort;statementSort=sort;
  const contexts={},matched=[];
  for(const row of data){const id=Number(row.item_id);if(!contexts[id])contexts[id]={matches:0,percent_of_need:null};
   if(statementMode==='near_expiry')contexts[id].matches++;
-  if(row.percent_of_need!=null)contexts[id].percent_of_need=row.percent_of_need;
+  if(row.percent_of_monthly_need!=null)contexts[id].percent_of_need=row.percent_of_monthly_need;
   if(!matched.includes(id))matched.push(id);
  }
  let rows=matched.map(itemById).filter(Boolean).filter(it=>
@@ -684,8 +687,6 @@ function modalClose(){const el=$('#entityModal');el.classList.remove('open');el.
 function editItem(it=null){
  const b=it?.branch||user.branch||'';
  const legacyWarn=it?.category&&!approvedBook(it.branch,it.category)?`<small class="legacy-book-warning">Existing category: ${E(it.category)} — please choose an approved book for this branch.</small>`:'';
- // Fields are in the EXACT reading/tab order agreed with the warehouse team.
- // RTL layout places the first member of each pair on the right.
  const wide=s=>s.replace('class="db-field"','class="db-field wide"');
  const f=[
   wide(field('Warehouse branch',branchField('branch',b,user.role==='admin'), 'Choose your assigned warehouse branch first.')),
@@ -694,23 +695,45 @@ function editItem(it=null){
   wide(field('Item name',`<input name="name" class="db-input" maxlength="160" value="${E(it?.name||'')}" placeholder="Name of the supply / instrument">`)).replace('class="db-field wide"','class="db-field wide" data-other-name'),
   field('Stock unit',`<select name="unit" class="db-select" data-item-unit required>${unitOptions(b,it?.unit||'')}</select>`),
   field('Book / register category',`<select name="category" class="db-select" data-item-book required>${optionsForBooks(b,it?.category||'')}</select>${legacyWarn}`),
-  field('Batch number',`<input name="batch_no" class="db-input" maxlength="90" required value="${E(it?.initial_batch_no||it?.display_batch_no||'')}" placeholder="Batch / lot number">`),
-  field('Expiration date',`<input name="expiry_date" class="db-input" type="date" required value="${E(it?.expiry_date||'')}">`, 'Required for every new item.'),
   field('Manufacture date (optional)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`),
   field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
-  field('Price — دينار',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" required value="${it?.price_fils==null?'':Math.floor(it.price_fils/1000)}" placeholder="0">`, 'IQD per stock unit.'),
-  field('Price — فلس',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" required value="${it?.price_fils==null?'':it.price_fils%1000}" placeholder="0 to 999">`, '1000 fils = 1 dinar.'),
-  wide(field('Annual requirement quantity',`<input name="annual_need" class="db-input" type="number" min="0" max="1000000000" step="1" inputmode="numeric" value="${it?.annual_need==null?'':E(it.annual_need)}" placeholder="${window.HWLang?.get()==='ar'?'الاحتياج خلال سنة كاملة':'Yearly quantity in stock units'}">`, 'Optional for existing items. Used to calculate scarce/surplus percentages.')),
+  wide(field('Annual requirement quantity',`<input name="annual_need" class="db-input" type="number" min="0" max="1000000000" step="1" inputmode="numeric" value="${it?.annual_need==null?'':E(it.annual_need)}" placeholder="${window.HWLang?.get()==='ar'?'الاحتياج خلال سنة كاملة':'Yearly quantity in stock units'}">`, 'Optional. Used for scarce and surplus reports.')),
   wide(field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Common names, Iraqi slang, abbreviations, alternate spellings...">${E(it?.information||'')}</textarea>`, 'All alternate names are searchable.'))
  ];
- if(it)f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
- modalOpen(it?'Edit item':'Register item','Select the warehouse branch first. Only the relevant names, approved units and official books will appear. New items start with zero stock.',f.join(''),`item:${it?.id||'new'}`);
+ if(it){
+  // These are historical catalog reference values only. Editing them never
+  // changes stock or price on saved lots. Opening stock is create-only.
+  f.push(field('Reference batch (optional)',`<input name="batch_no" class="db-input" maxlength="90" value="${E(it.initial_batch_no||it.display_batch_no||'')}">`));
+  f.push(field('Reference expiry (optional)',`<input name="expiry_date" class="db-input" type="date" value="${E(it.expiry_date||'')}">`));
+  f.push(field('Reference price — دينار',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" value="${it.price_fils==null?'':Math.floor(it.price_fils/1000)}">`));
+  f.push(field('Reference price — فلس',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" value="${it.price_fils==null?'':it.price_fils%1000}">`));
+  f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
+ }else{
+  f.push(`<div class="db-field wide opening-balance-choice"><label class="opening-balance-label"><input type="checkbox" name="opening_balance" value="1" data-opening-balance><span>Opening balance</span></label><small>Tick only for stock already physically in the warehouse. The opening quantity will be recorded once in movement history.</small></div>`);
+  f.push(`<div class="opening-balance-fields wide" data-opening-fields hidden><div class="opening-balance-heading">Opening stock details</div><div class="db-grid opening-balance-grid">
+   ${field('Opening quantity',`<input name="opening_qty" class="db-input" type="number" min="1" max="100000000" step="1" inputmode="numeric" placeholder="0" disabled>`)}
+   ${field('Batch / lot number',`<input name="batch_no" class="db-input" maxlength="90" placeholder="e.g. LOT-001" disabled>`)}
+   ${field('Expiration date',`<input name="expiry_date" class="db-input" type="date" disabled>`)}
+   ${field('Price — دينار',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" placeholder="0" disabled>`)}
+   ${field('Price — فلس',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" placeholder="0–999" disabled>`)}
+   </div><small class="opening-balance-hint">This is recorded as رصيد افتتاحي (opening stock), not a received shipment. All five fields are required.</small></div>`);
+ }
+ modalOpen(it?'Edit item':'Register item',it?'Edit the registered details without changing historical received or opening quantities.':'Register an item without stock, or tick رصيد افتتاحي to record existing physical stock in one step.',f.join(''),`item:${it?.id||'new'}`);
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.12</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.16</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
+ syncOpeningBalanceFields(form);
  window.HWLang?.apply();
+}
+function syncOpeningBalanceFields(form){
+ if(!form?.dataset.entity || form.dataset.entity!=='item:new')return;
+ const checkbox=form.querySelector('[data-opening-balance]'),wrap=form.querySelector('[data-opening-fields]');
+ if(!checkbox||!wrap)return;
+ const on=checkbox.checked;
+ wrap.hidden=!on;
+ wrap.querySelectorAll('input').forEach(el=>{el.disabled=!on;el.required=on;});
 }
 function syncItemBranchFields(form, previousBook='', previousUnit=''){
  if(!form?.dataset.entity?.startsWith('item:'))return;
@@ -806,14 +829,15 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
   reloadShipmentDropdowns();
   if(ctx.mode==='receive'){
    const sel=ctx.line.querySelector('select[data-key="item_id"]');if(sel)sel.value=String(createdItem.id);
-   const batch=ctx.line.querySelector('[data-key="batch_no"]');if(batch)batch.value=d.batch_no;
-   const expiry=ctx.line.querySelector('[data-key="expiry_date"]');if(expiry)expiry.value=d.expiry_date;
+   const batch=ctx.line.querySelector('[data-key="batch_no"]');if(batch&&d.batch_no)batch.value=d.batch_no;
+   const expiry=ctx.line.querySelector('[data-key="expiry_date"]');if(expiry&&d.expiry_date)expiry.value=d.expiry_date;
    prefillReceiptPrice(ctx.line);
    inlineNewItem=null;toast('Item registered. Add its received quantity to the shipment.');
   }else if(ctx.mode==='issue'){
-   const product=ctx.line.querySelector('[data-issue-product]');if(product){product.value=String(createdItem.id);syncIssueProduct(ctx.line);}
-   quickReceiptForNewItem(createdItem.id,ctx);
-   toast('Item registered with zero stock. Record an incoming receipt to issue it.');
+   const product=ctx.line.querySelector('[data-issue-product]');
+   if(product){product.value=String(createdItem.id);syncIssueProduct(ctx.line,createdItem.opening_batch_id||undefined);}
+   if(createdItem.opening_batch_id){inlineNewItem=null;toast('Opening balance recorded. The new batch is available for shipment.');}
+   else{quickReceiptForNewItem(createdItem.id,ctx);toast('Item registered with zero stock. Record an incoming receipt to issue it.');}
   }
  }else{inlineNewItem=null;showPage(view);toast('Saved successfully in the database')}
 }
@@ -863,6 +887,7 @@ document.addEventListener('click',async e=>{
  const statement=e.target.closest('[data-statement]');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
  if(e.target.closest('[data-reset-statement-expiry]')){statementExpiryBefore='';try{await reloadPositions()}catch(err){toast(err.message,'error')}return;}
  if(e.target.closest('[data-apply-statement-percent]')){try{await applyStatementPercent()}catch(err){toast(err.message,'error')}return;}
+ if(e.target.closest('[data-reset-statement-percent]')){const scarce=statementMode==='scarce';const old=scarce?statementScarcePct:statementSurplusPct;if(scarce)statementScarcePct=DEFAULT_SCARCE_PERCENT;else statementSurplusPct=DEFAULT_SURPLUS_PERCENT;try{await reloadPositions()}catch(err){if(scarce)statementScarcePct=old;else statementSurplusPct=old;toast(err.message,'error')}return;}
  const trigger=e.target.closest('[data-dept-trigger]');if(trigger){const picker=trigger.closest('[data-dept-picker]');if(picker.querySelector('[data-dept-popup]').hidden)openDepartmentPicker(picker);else closeDepartmentPicker(picker);return}
  const option=e.target.closest('[data-dept-option]');if(option){selectDepartment(option.closest('[data-dept-picker]'),option);return}
  if(!e.target.closest('[data-dept-picker]'))document.querySelectorAll('[data-dept-picker]').forEach(closeDepartmentPicker);
@@ -901,7 +926,7 @@ document.addEventListener('submit',async e=>{
 });
 async function applyStatementPercent(){
  const inp=$('#statementPercentInput');if(!inp)return;
- if(inp.value && !inp.checkValidity())throw Error('Percentage must be above zero and at most 1000, with up to two decimals.');
+ if(!inp.value.trim() || !inp.checkValidity())throw Error('Percentage must be above zero and at most 1000, with up to two decimals.');
  const next=inp.value.trim();
  const old=statementMode==='scarce'?statementScarcePct:statementSurplusPct;
  if(statementMode==='scarce')statementScarcePct=next;else statementSurplusPct=next;
@@ -934,6 +959,7 @@ document.addEventListener('change',async e=>{
  if(e.target.matches('#receiveForm input[name="route"]'))syncIncomingRoute(e.target.closest('form'));
  if(e.target.matches('[data-receive-line] select[data-key="item_id"]'))prefillReceiptPrice(e.target.closest('[data-receive-line]'));
  if(e.target.matches('#entityForm select[name="branch"]'))syncItemBranchFields(e.target.closest('#entityForm'));
+ if(e.target.matches('#entityForm [data-opening-balance]'))syncOpeningBalanceFields(e.target.closest('#entityForm'));
  if(e.target.matches('[data-user-role]'))syncUserBranchField(e.target.closest('#entityForm'));
 });
 function syncUserBranchField(form){

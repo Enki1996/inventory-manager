@@ -51,7 +51,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 8
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.14.0'
+APP_RELEASE = '4.16.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -267,7 +267,8 @@ def item_name_fields(d, branch, *, old=None):
 
 
 def item_batch_no(d):
-    return validated_text(d, 'batch_no', max_len=90)
+    # No batch exists merely because a product is registered in the catalog.
+    return validated_text(d, 'batch_no', required=False, max_len=90)
 
 
 def make_sku(branch):
@@ -280,8 +281,8 @@ def item_details(d):
     manufacturer = validated_text(d, 'manufacturer', required=False, max_len=160)
     manufacture_date = dated(d.get('manufacture_date'), 'manufacture_date')
     expiry_date = dated(d.get('expiry_date'), 'expiry_date')
-    if not expiry_date:
-        err(422, 'Expiration date is required')
+    # Stock-less catalog registration has no known lot or expiry yet.
+    # Opening-balance registration validates the real lot expiry separately.
     information = validated_text(d, 'information', required=False, max_len=2000)
     if manufacture_date and expiry_date and manufacture_date > expiry_date:
         err(422, 'Item expiration date must not be earlier than its manufacture date')
@@ -789,7 +790,26 @@ async def create_item(request: Request):
     batch_no = item_batch_no(d)
     sku = validated_text(d, 'sku', required=False, max_len=50).upper() or make_sku(branch)
     generic, manufacturer, mfg, exp, info = item_details(d)
-    unit_price = price_from_fields(d)
+    opening_balance = boolean_flag(d.get('opening_balance'), 'opening_balance')
+    opening_qty = None
+    if opening_balance:
+        # A physical opening balance is a recorded stock movement, never an
+        # untraceable edit to on_hand or a fictional incoming purchase receipt.
+        batch_no = validated_text(d, 'batch_no', max_len=90)
+        if not exp:
+            err(422, 'Opening balance requires a lot expiry date')
+        opening_qty = integer(d, 'opening_qty', 1, 100_000_000)
+        unit_price = price_from_fields(d)
+    else:
+        # New forms omit all lot details unless opening stock is checked.
+        # Older API clients may still submit catalog *reference* lot/price
+        # fields; accept them as zero-stock metadata for compatibility.
+        if d.get('opening_qty') not in (None, ''):
+            err(422, 'Enable Opening balance before entering an opening quantity')
+        if d.get('price_dinars') in (None, '') and d.get('price_fils_component') in (None, ''):
+            unit_price = None
+        else:
+            unit_price = price_from_fields(d)
     annual_need = annual_need_from_fields(d)
     try:
         with db() as c:
@@ -797,13 +817,37 @@ async def create_item(request: Request):
                             manufacturer,manufacture_date,expiry_date,information,price_fils,annual_need,created_at)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,annual_need,now()))
-            # Register a batch with zero stock; it becomes available only after an IN movement.
-            c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils) VALUES(?,?,?,?,?)',
-                      (q.lastrowid,batch_no,exp,now(),unit_price))
+            opening_batch_id = None
+            opening_code = None
+            if not opening_balance and batch_no:
+                # Legacy reference-only item registration: no stock or
+                # inbound receipt is fabricated (zero quantity).
+                c.execute('''INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils)
+                    VALUES(?,?,?,?,?)''', (q.lastrowid,batch_no,exp,now(),unit_price))
+            if opening_balance:
+                # One atomic transaction: catalog entry + lot + positive ledger
+                # movement + audit record. No additional incoming receipt needed.
+                opening_batch_id = c.execute('''INSERT INTO batches(item_id,batch_no,expiry_date,on_hand,created_at,unit_price_fils)
+                    VALUES(?,?,?,?,?,?)''', (q.lastrowid,batch_no,exp,opening_qty,now(),unit_price)).lastrowid
+                move = c.execute('''INSERT INTO movements(code,kind,paper_ref,source,notes,route,created_by,created_at)
+                    VALUES(?,?,?,?,?,?,?,?)''', ('TEMP-'+secrets.token_hex(6),'ADJUST_PLUS','OPENING-BALANCE',
+                    'رصيد افتتاحي','Initial physical stock recorded on item registration',
+                    'opening_balance',u['id'],now()))
+                opening_code = f'OPEN-{move.lastrowid:06d}'
+                c.execute('UPDATE movements SET code=? WHERE id=?', (opening_code,move.lastrowid))
+                c.execute('''INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils)
+                    VALUES(?,?,?,?,?)''', (move.lastrowid,opening_batch_id,opening_qty,1,unit_price))
+                audit(c,u['id'],'OPENING_BALANCE_CREATED',{
+                    'item_id':q.lastrowid,'movement_id':move.lastrowid,'code':opening_code,
+                    'batch_id':opening_batch_id,'batch_no':batch_no,'expiry_date':exp,
+                    'quantity':opening_qty,'unit_price_fils':unit_price,'branch':branch})
             audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':cat,'unit':unit,'initial_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price,'annual_need':annual_need})
-            return {'ok': True, 'id': q.lastrowid, 'sku':sku}
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,
+                  'price_fils':unit_price,'annual_need':annual_need,'opening_balance':opening_balance,
+                  'opening_movement_code':opening_code})
+            return {'ok': True, 'id': q.lastrowid, 'sku':sku, 'opening_balance':opening_balance,
+                    'opening_batch_id':opening_batch_id,'opening_movement_code':opening_code}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
 
@@ -824,7 +868,12 @@ async def update_item(item_id: int, request: Request):
             category = require_book(branch, d.get('category'))
             name, trade = item_name_fields(d, branch)
             generic, manufacturer, mfg, exp, info = item_details(d)
-            unit_price = price_from_fields(d)
+            # Legacy products may not have a catalog reference price. Stock-lot
+            # valuation is maintained independently and never modified here.
+            if d.get('price_dinars') in (None, '') and d.get('price_fils_component') in (None, ''):
+                unit_price = old['price_fils']
+            else:
+                unit_price = price_from_fields(d)
             annual_need = annual_need_from_fields(d, prior=old['annual_need'])
             # Hidden legacy generic-name field must survive an edit in the new form.
             if 'generic_name' not in d:
@@ -841,7 +890,7 @@ async def update_item(item_id: int, request: Request):
             # If it's a new batch, seed it at zero stock for future receiving.
             existing_batch = c.execute('SELECT id FROM batches WHERE item_id=? AND batch_no=?',
                                        (item_id,batch_no)).fetchone()
-            if not existing_batch:
+            if batch_no and not existing_batch:
                 c.execute('INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils) VALUES(?,?,?,?,?)',
                           (item_id,batch_no,exp,now(),unit_price))
             c.execute('''UPDATE items SET sku=?,name=?,category=?,branch=?,unit=?,generic_name=?,trade_name=?,initial_batch_no=?,
@@ -1187,7 +1236,7 @@ def dashboard_data(request: Request):
         return {'items':total_items,'stock':total_units,'departments':dept,'movements':movements_count,'low_stock':low,'expiry_soon':soon}
 
 
-# V4.12 — Warehouse positions: adjustable cutoff and annual-requirement ratios.
+# V4.15 — Warehouse positions: adjustable cutoff and MONTHLY-requirement ratios.
 # Default expiry window remains calendar-month based: through the last day
 # of the current month *next year*, not a rolling 365-day period.
 def position_window():
@@ -1217,8 +1266,16 @@ def warehouse_positions(request: Request, expiry_before: str | None = None,
     else:
         end_exclusive = default_end
     last_included = (dt.date.fromisoformat(end_exclusive) - dt.timedelta(days=1)).isoformat()
+    # Monthly need is annual_need / 12. The default comparisons are strict:
+    #   scarce: usable stock < 20% of monthly need
+    #   surplus: usable stock > 120% of monthly need
+    # Passing a percentage overrides only that report's default.
     scarce_limit = percent_parameter(scarce_pct, 'scarce_pct')
     surplus_limit = percent_parameter(surplus_pct, 'surplus_pct')
+    if scarce_limit is None:
+        scarce_limit = Decimal('20')
+    if surplus_limit is None:
+        surplus_limit = Decimal('120')
     with db(readonly=True) as c:
         missing = [dict(r) for r in c.execute('''
             SELECT i.id AS item_id, i.sku, i.name, i.trade_name, i.generic_name, i.information, i.branch,
@@ -1245,8 +1302,8 @@ def warehouse_positions(request: Request, expiry_before: str | None = None,
             WHERE i.active=1 AND b.on_hand>0 AND b.expiry_date IS NOT NULL
               AND b.expiry_date < ?
         ''', (today,)).fetchone()['lots']
-        # Report ratio compares usable, dated, unexpired stock against annual need.
-        # Do not count expired or unknown-expiry lots as safe stock for this calculation.
+        # Ratio compares usable, dated, unexpired stock against MONTHLY need.
+        # Expired and unknown-expiry lots are excluded from usable stock.
         balance_rows = [dict(r) for r in c.execute('''
             SELECT i.id AS item_id, i.sku, i.name, i.trade_name, i.generic_name,
                    i.information, i.branch, i.category, i.unit, i.annual_need,
@@ -1262,11 +1319,16 @@ def warehouse_positions(request: Request, expiry_before: str | None = None,
         if not need or need <= 0:
             without_annual += 1
             continue
-        percent = Decimal(record['stock']) * 100 / Decimal(need)
-        record['percent_of_need'] = round(float(percent), 2)
-        if scarce_limit is not None and percent < scarce_limit:
+        monthly_need = Decimal(need) / Decimal(12)
+        percent = Decimal(record['stock']) * 100 / monthly_need
+        record['monthly_need'] = round(float(monthly_need), 3)
+        record['percent_of_monthly_need'] = round(float(percent), 2)
+        # Retain the historical response key for older frontends, but its
+        # value is now expressed relative to monthly requirement.
+        record['percent_of_need'] = record['percent_of_monthly_need']
+        if percent < scarce_limit:
             scarce.append(record.copy())
-        if surplus_limit is not None and percent > surplus_limit:
+        if percent > surplus_limit:
             surplus.append(record.copy())
     scarce.sort(key=lambda x: (x['percent_of_need'], x['name'].casefold()))
     surplus.sort(key=lambda x: (-x['percent_of_need'], x['name'].casefold()))
@@ -1278,6 +1340,9 @@ def warehouse_positions(request: Request, expiry_before: str | None = None,
         'scarce': scarce, 'surplus': surplus,
         'scarce_pct': str(scarce_limit) if scarce_limit is not None else None,
         'surplus_pct': str(surplus_limit) if surplus_limit is not None else None,
+        'percent_basis': 'monthly',
+        'monthly_need_formula': 'annual_need / 12',
+        'default_scarce_pct': '20', 'default_surplus_pct': '120',
         'annual_need_unset_count': without_annual,
         'expired_lot_count': expired_stock,
     }
