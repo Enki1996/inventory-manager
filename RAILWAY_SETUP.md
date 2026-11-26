@@ -45,3 +45,15 @@ Keep the same Railway service and `/data` volume. Schema is still **V8**. `/api/
 ## V4.16 opening balance update
 
 This update uses the existing schema V8. It only adds application logic and the optional opening-stock fields. Keep the same Railway service and persistent `/data` volume; do **not** overwrite or upload a database file during the code deployment. Make a backup first. Check `/api/health` for `release: 4.16.0`. See `V4_16_CHANGES.md`.
+
+
+## V4.17 — upgrade the same Railway service
+
+1. Download an admin backup of your **current live database** and save it to a secure computer.
+2. Keep the existing Railway volume mounted at `/data` and keep `WAREHOUSE_DATA_DIR=/data`.
+3. Replace the application **source files** in your existing private GitHub repository; do not upload any `.sqlite3` file, backup ZIP, or passwords to GitHub.
+4. Redeploy the existing Railway service. On startup, V4.17 adds optional per-lot manufacture dates and employee profile fields; existing stock, accounts and movements stay intact.
+5. Open `https://YOUR-DOMAIN/api/health` and check `"release":"4.17.0"` and `"version":9`.
+6. Verify **رصيد افتتاحي**, **حركة المواد**, **Departments → Shipment history**, and **My account** with test records.
+
+Note: This is a **code update**, not a database restore. Do not restore a demo backup when upgrading your live app.

@@ -1,6 +1,16 @@
-# Hospital Warehouse IMS — V4.16
+# Hospital Warehouse IMS — V4.17
 
 Arabic-first bilingual, single-warehouse inventory web app with role and branch permissions, multiple batches/expiry dates/prices, receiving and distribution, FEFO stock-issuing recommendations, full movement history, 59 preloaded departments, inventory inspection, warehouse statements, and administrator backup/restore.
+
+## V4.17: Multiple opening lots, item timelines, department shipments and staff profiles
+
+See **V4_17_CHANGES.md** for exact behavior and deployment notes.
+
+- **رصيد افتتاحي** now accepts multiple batch/expiry/manufacture/quantity/price rows at once.
+- New **حركة المواد** tab shows every historical shipment for the selected item.
+- The **Departments** list displays the last shipment date and offers each department's full shipment history.
+- New **My account / الملف الشخصي** page for an employee's own name, phone, email, age and job title.
+- Auto-upgrades the existing SQLite database to **schema V9** without resetting stock; tests and original V4.16 restore were verified.
 
 ## V4.16: Optional opening balance (رصيد افتتاحي)
 
@@ -25,8 +35,8 @@ Full examples, boundary rules, and verification steps: **V4_15_CHANGES.md**.
 1. Export a full backup from the currently running warehouse before changing code. Backup ZIPs are sensitive (contain data and password hashes); store privately.
 2. Confirm the current Railway service retains its persistent volume at `/data`, with `WAREHOUSE_DATA_DIR=/data`. Do **not** detach, delete, reset, or replace it.
 3. Extract this ZIP. Push its *files* to the root of your **existing private GitHub repository** (not the ZIP, not the demo database, not `/data`).
-4. Redeploy that same Railway service. The app still uses **schema V8**, so there is no database migration for V4.16.
-5. Visit `https://YOUR-SITE/api/health` to verify `"release":"4.16.0"` and `"version":8`.
+4. Redeploy that same Railway service. V4.17 **adds optional schema V9 columns automatically**, keeping your existing inventory history.
+5. Visit `https://YOUR-SITE/api/health` to verify `"release":"4.17.0"` and `"version":9`.
 6. Open **المواقف**, verify the 20% / 120% defaults, try a custom percentage, then use the Reset button. Check the existing stock, users, departments, and movements are still intact.
 
 New deployment setup is documented in **RAILWAY_SETUP.md**.

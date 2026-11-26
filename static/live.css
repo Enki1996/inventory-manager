@@ -215,3 +215,41 @@ body.column-dialog-open{overflow:hidden}
 .opening-balance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .opening-balance-hint{display:block;font-size:10px;color:#557a84;line-height:1.65;margin-top:14px}
 @media(max-width:700px){.opening-balance-grid{grid-template-columns:1fr}}
+
+/* V4.17: counted opening lots and read-only shipment history. */
+.opening-lot-row{padding:14px;margin-bottom:13px;border-radius:14px;border:1px solid #cee4e7;background:#fff;box-shadow:0 3px 14px rgba(31,114,132,.04)}
+.opening-lot-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px;color:#0b707c;font-size:12px}
+.opening-lot-header button:disabled{opacity:.45;cursor:not-allowed}
+.opening-balance-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin:0}
+.opening-lot-row .db-field{min-width:0}
+.opening-lot-row .db-input{max-width:100%}
+.opening-balance-fields>[data-add-opening-lot]{margin-top:2px}
+.shipment-history-overlay{position:fixed;inset:0;z-index:1200;background:rgba(22,58,74,.48);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;padding:20px}
+.shipment-history-overlay.open{display:flex}
+.shipment-history-dialog{width:min(1140px,100%);max-height:92dvh;display:flex;flex-direction:column;overflow:hidden;background:#fff;border-radius:22px;border:1px solid #d7e9ed;box-shadow:0 25px 80px rgba(4,51,70,.25);direction:inherit;text-align:start}
+.shipment-history-header{padding:22px 25px 15px;display:flex;justify-content:space-between;align-items:start;gap:18px;border-bottom:1px solid #dcebee}
+.shipment-history-header small{display:block;color:#0a858c;font-weight:800;font-size:12px;margin-bottom:5px}
+.shipment-history-header h2{font-size:23px;line-height:1.35;color:#133d53;margin:0 0 5px}
+.shipment-history-header p{font-size:12px;color:#6d8a9b;line-height:1.6;margin:0}
+.shipment-history-header button{flex-shrink:0}
+.shipment-history-scroll{overflow-y:auto;padding:20px 25px;min-height:100px;overscroll-behavior:contain}
+.shipment-history-footer{padding:10px 25px;background:#f7fbfc;border-top:1px solid #e4eff0;color:#71909e;font-size:11px}
+.shipment-history-card{padding:18px;background:#fafeff;border:1px solid #dbeaed;border-radius:15px;margin-bottom:15px}
+.shipment-history-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}
+.shipment-history-title strong{display:block;color:#133d53;font-size:15px}.shipment-history-title .tiny{display:block;margin-top:4px}
+.shipment-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px;margin-bottom:14px}
+.shipment-meta>div{min-width:0;display:grid;gap:4px;background:#f0f8fa;border-radius:8px;padding:10px 12px}
+.shipment-meta span{font-size:10px;color:#728e9f}.shipment-meta strong{font-size:12px;color:#31596e;overflow-wrap:anywhere}
+.shipment-history-card .db-table{min-width:780px}
+.shipment-history-card .db-table tr.selected-shipment-line{background:#e8f7f6}
+.shipment-notes{font-size:11px;color:#637e89;margin:13px 0 0}
+.shipment-counter{font-weight:800;color:#20767f;margin-bottom:15px}
+.profile-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 23px}
+.profile-summary>div{border-radius:12px;background:#f0f9fa;padding:14px;min-width:0;display:grid;gap:5px}
+.profile-summary span{font-size:11px;color:#608597}.profile-summary strong{font-size:13px;color:#1e5361;overflow-wrap:anywhere}
+.profile-help{margin:14px 0 0}
+@media(max-width:750px){.opening-balance-grid{grid-template-columns:1fr}.shipment-history-overlay{padding:7px}.shipment-history-dialog{max-height:97dvh;border-radius:14px}.shipment-history-header{padding:17px 13px 11px}.shipment-history-header h2{font-size:19px}.shipment-history-header p{display:none}.shipment-history-scroll{padding:12px}.shipment-history-footer{padding:10px 12px}.shipment-meta{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.profile-summary{grid-template-columns:1fr}}
+
+/* Restore the requested color convention in all activity timelines: إدخال مخزني red, إخراج مخزني blue. */
+.pill.intake{background:#ffe9ea;color:#a53e4b;border:1px solid #f2c8ce}
+.pill.dispatch{background:#e4f1ff;color:#246e9d;border:1px solid #c3dff5}

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as root:
     os.environ['WAREHOUSE_DATA_DIR'] = root
     from app import app, DB, SCHEMA_VERSION, APP_RELEASE, position_window
-    assert SCHEMA_VERSION == 8 and APP_RELEASE == '4.16.0'
+    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.17.0'
     today = dt.datetime.now(ZoneInfo('Asia/Baghdad')).date()
     _, end, last = position_window()
     after = (dt.date.fromisoformat(end) + dt.timedelta(days=40)).isoformat()
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as root:
         response=client.get('/api/backup/export')
         assert response.status_code==200
         z=zipfile.ZipFile(io.BytesIO(response.content))
-        assert json.loads(z.read('manifest.json'))['schema_version']==8
+        assert json.loads(z.read('manifest.json'))['schema_version']==9
         sql=sqlite3.connect(':memory:');tmp=Path(root)/'verify.sqlite3';tmp.write_bytes(z.read('warehouse.sqlite3'))
         check=sqlite3.connect(tmp)
         assert check.execute('SELECT annual_need FROM items WHERE id=?',(scarce,)).fetchone()[0]==240

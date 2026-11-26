@@ -1,4 +1,4 @@
-/* Live V4.16 bilingual warehouse application: all stock, including opening balances, is audited. */
+/* Live V4.17 bilingual warehouse application: all stock, including opening balances, is audited. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -144,10 +144,10 @@ function fullItemPanel(it,stat){
   ['Total stock',`${N(stat.physical)} ${it.unit}`],['Usable / unexpired',`${N(stat.usable)} ${it.unit}`],
   ['Expired stock',`${N(stat.expired)} ${it.unit}`],['No expiry recorded',`${N(stat.unknown)} ${it.unit}`]];
  const lots=[...stat.lots].sort((a,b)=>(a.expiry_date||'9999-12-31').localeCompare(b.expiry_date||'9999-12-31')||a.id-b.id);
- const lotRows=lots.map((b,i)=>`<tr><td><span class="lot-row-index">${N(i+1)}</span></td><td><strong>${E(b.batch_no)}</strong><div class="tiny">Lot ID ${N(b.id)}</div></td><td>${E(b.expiry_date||'—')}</td><td><strong>${N(b.on_hand)}</strong> ${E(it.unit)}</td><td>${priceLabel(b.unit_price_fils)}</td><td>${badge(lotStatus(b),lotStatus(b)==='Expired'?'danger':lotStatus(b)==='Expiry unknown'?'warning':'blue')}</td></tr>`);
+ const lotRows=lots.map((b,i)=>`<tr><td><span class="lot-row-index">${N(i+1)}</span></td><td><strong>${E(b.batch_no)}</strong><div class="tiny">Lot ID ${N(b.id)}</div></td><td>${E(b.manufacture_date||'—')}</td><td>${E(b.expiry_date||'—')}</td><td><strong>${N(b.on_hand)}</strong> ${E(it.unit)}</td><td>${priceLabel(b.unit_price_fils)}</td><td>${badge(lotStatus(b),lotStatus(b)==='Expired'?'danger':lotStatus(b)==='Expiry unknown'?'warning':'blue')}</td></tr>`);
  return `<div class="expanded-item-panel"><div class="expanded-header"><h3>All stored lots — ${E(it.trade_name||it.name)}</h3><span class="lot-summary-count">${N(lots.length)} stored lot(s)</span></div>
  <p class="lot-table-intro">Every lot is listed separately with its own expiry date, remaining quantity and stored unit price—even when batch numbers repeat.</p>
- ${lots.length?table(['#','Batch number','Expiry date','Remaining quantity','Stored lot price','Status'],lotRows):msg('No lots registered','This product has not been received yet.')}
+ ${lots.length?table(['#','Batch number','Manufacture date','Expiry date','Remaining quantity','Stored lot price','Status'],lotRows):msg('No lots registered','This product has not been received yet.')}
  <h3>Full item information</h3>
  <div class="full-item-fields">${fieldValues.map(([label,v])=>`<div class="full-field"><span>${E(label)}</span><strong>${E(v??'—')}</strong></div>`).join('')}</div>
  <div class="item-ledger-heading"><h3>Complete recorded movement history</h3><span class="muted-hint">Fetched from the database in pages, including older movements.</span></div>
@@ -198,7 +198,7 @@ async function reloadPositions(){
  }
 }
 
-const headers={overview:'Warehouse Overview',inventory:'Inventory',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
+const headers={overview:'Warehouse Overview',inventory:'Inventory',item_movement:'Item movements',profile:'My account',receiving:'Receive Shipments',distribution:'Prepare outgoing shipment',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Settings'};
 const can=p=>!!user?.permissions.includes(p);
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
 const branchName=b=>BRANCHES.find(x=>x[0]===b)?.[1]||'Unassigned — admin classification needed';
@@ -344,14 +344,14 @@ function filterInventory(){
  const count=$('#inventoryShown');if(count)count.textContent=`${N(matched.length)} of ${N(cache.items.length)} items`;
  window.HWLang?.apply();
 }
-function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.name)}</strong></td><td>${badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td>${can('department_write')?`<div class="db-small-actions"><button data-edit-dept="${it.id}">Edit</button></div>`:'—'}</td></tr>`)}
+function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.name)}</strong></td><td>${it.last_shipment_at?D(it.last_shipment_at):'<span class="muted-hint">No shipments yet</span>'}</td><td>${N(it.shipment_count)} </td><td>${badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td><div class="db-small-actions"><button type="button" data-open-dept-shipments="${it.id}">Shipment history</button>${can('department_write')?`<button type="button" data-edit-dept="${it.id}">Edit</button>`:''}</div></td></tr>`)}
 const routeNames={opening_balance:'Opening balance',department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
 function movementRows(movements){return movements.map(m=>{
  const pending=m.paperwork_pending===1;
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'intake':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
+ return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Mfg: ${E(l.manufacture_date||'—')} · Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
 })}
 
 function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
@@ -379,9 +379,84 @@ function inventory(){return `${head('Item inventory','All product details and st
  <label class="include-inactive"><input id="itemIncludeInactive" type="checkbox" ${inventoryInactive?'checked':''}> Include inactive products</label>
  ${columnPicker('inventory')}<span class="muted-hint" id="inventoryShown"></span>
  </div><div id="itemResults"></div>`,'package')}`}
-function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${table(['Department','Status','Actions'],departmentRows(cache.departments))}</div>`,'building')}`}
-function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=table(['Department','Status','Actions'],departmentRows(cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q))));}
+function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments))}</div>`,'building')}`}
+function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q))));}
 
+// V4.17: dedicated item and department shipment timelines.
+function itemMovements(){
+ const rows=cache.items.map(it=>{
+  const stat=lotStats(it);
+  return `<tr data-item-movement-row><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button type="button" class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
+ });
+ return `${head('حركة المواد — Item movements','Choose any registered item to inspect every incoming, outgoing, opening-balance, return and adjustment document it appeared in.')}
+ ${panel('All registered items',`<div class="db-toolbar">${inp('item-movement-search','Search item, scientific name, batch or alias...','search','id="itemMovementSearch"')}</div><div id="itemMovementResults">${table(['Product','Branch','Register book','Stock','Lots','Movement history'],rows)}</div>`,'history')}`;
+}
+function filterItemMovements(){
+ const q=normalizeItemSearch($('#itemMovementSearch')?.value||'');
+ const rows=cache.items.filter(it=>!q||rowSearchText(it).includes(q)).map(it=>{
+  const stat=lotStats(it);
+  return `<tr><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(it.unit)}</td><td>${N(stat.lots.length)}</td><td><button class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
+ });
+ const root=$('#itemMovementResults');if(root)root.innerHTML=table(['Product','Branch','Register book','Stock','Lots','Movement history'],rows);
+ window.HWLang?.apply();
+}
+let shipmentHistoryScope=null;
+function closeShipmentHistory(){const el=$('#movementDetailModal');if(!el)return;el.classList.remove('open');el.setAttribute('aria-hidden','true');el.innerHTML='';shipmentHistoryScope=null;}
+async function openShipmentHistory(type,id){
+ const obj=type==='item'?cache.items.find(x=>x.id===id):cache.departments.find(x=>x.id===id);
+ if(!obj)return;
+ const name=type==='item'?(obj.trade_name||obj.name):obj.name;
+ shipmentHistoryScope={type,id};
+ const modal=$('#movementDetailModal');
+ modal.innerHTML=`<section class="shipment-history-dialog" role="dialog" aria-modal="true" aria-label="Recorded shipment history" tabindex="-1"><header class="shipment-history-header"><div><small>${type==='item'?'حركة المواد':'حركات القسم'}</small><h2>${E(name)}</h2><p>All recorded shipments, newest first. Every shipment includes document references and its full stock-line details.</p></div><button type="button" class="db-btn secondary small" data-close-shipment-history>إغلاق ×</button></header><div class="shipment-history-scroll" id="shipmentHistoryContent">${msg('Loading shipment history...')}</div><footer class="shipment-history-footer"><span>Read-only records — stock quantities are not changed here.</span></footer></section>`;
+ modal.classList.add('open');modal.setAttribute('aria-hidden','false');window.HWLang?.apply();
+ modal.querySelector('[data-close-shipment-history]')?.focus();
+ await loadShipmentHistory(0);
+}
+function shipmentCard(m,scope){
+ const route=routeNames[m.route]||m.route||'—';
+ const direction=m.kind==='IN'||m.kind==='ADJUST_PLUS'||m.kind==='RETURN';
+ const color=m.route==='opening_balance'?'adjustment':direction?'intake':'dispatch';
+ const recipient=m.department_name||m.external_destination||m.source||'—';
+ const documents=[['رقم الطلبية / Order',m.paper_ref],['ورقة التجهيز / Dispatch',m.dispatch_ref],['المصدر / الوجهة',recipient],['Route',route],['Employee',m.operator],['Trusted pharmacist',m.trusted_pharmacist_name],['رقم كتاب التخويل',m.authorization_ref]].filter(([,v])=>!!v);
+ const lines=(m.lines||[]).map(l=>`<tr class="${scope.type==='item'&&l.item_id===scope.id?'selected-shipment-line':''}"><td>${E(l.trade_name||l.item_name)}<div class="tiny">${E(l.sku)}</div></td><td>${E(l.batch_no)}<div class="tiny">Lot ${N(l.lot_id)}</div></td><td>${E(l.manufacture_date||'—')}</td><td>${E(l.expiry_date||'—')}</td><td>${l.direction>0?'+':'−'}${N(l.qty)} ${E(l.unit)}</td><td>${priceLabel(l.unit_price_fils)}</td></tr>`);
+ return `<article class="shipment-history-card"><div class="shipment-history-title"><div><strong>${E(m.code)}</strong><span class="tiny">${D(m.created_at)}</span></div>${badge(m.route==='opening_balance'?'رصيد افتتاحي':direction?'إدخال مخزني':'إخراج مخزني',color)}</div><div class="shipment-meta">${documents.map(([k,v])=>`<div><span>${E(k)}</span><strong>${E(v)}</strong></div>`).join('')}${m.paperwork_pending?'<div class="pending-paperwork">Emergency documents pending</div>':''}</div><div class="db-table-wrap">${table(['Product','Lot','Manufacture','Expiry','Quantity','Unit price'],lines)}</div>${m.notes?`<p class="shipment-notes">${E(m.notes)}</p>`:''}</article>`;
+}
+async function loadShipmentHistory(offset=0){
+ const state=shipmentHistoryScope,el=$('#shipmentHistoryContent');if(!state||!el)return;
+ const btn=el.querySelector('[data-more-shipments]');if(btn){btn.disabled=true;btn.textContent='Loading…';}
+ try{
+  const path=state.type==='item'?`/api/items/${state.id}/shipments`:`/api/departments/${state.id}/shipments`;
+  const data=await api(`${path}?limit=25&offset=${offset}`);
+  if(!shipmentHistoryScope||shipmentHistoryScope.id!==state.id||shipmentHistoryScope.type!==state.type)return;
+  if(offset===0)el.innerHTML=`<div class="shipment-counter">${N(data.total)} recorded shipment(s)</div><div id="shipmentCards"></div>`;
+  el.querySelector('[data-more-shipments]')?.remove();
+  const cards=el.querySelector('#shipmentCards');
+  cards?.insertAdjacentHTML('beforeend',data.shipments.map(m=>shipmentCard(m,state)).join(''));
+  if(!data.total)el.innerHTML=msg('No shipments yet','This item or department has no recorded stock movements.');
+  const next=offset+data.shipments.length;
+  if(next<data.total)el.insertAdjacentHTML('beforeend',`<button type="button" class="db-btn secondary" data-more-shipments="${next}">Show more (${N(data.total-next)} remaining)</button>`);
+  window.HWLang?.apply();
+ }catch(err){toast(err.message,'error');if(btn){btn.disabled=false;btn.textContent='Retry'}}
+}
+function profilePage(){
+ return `${head('My account — الملف الشخصي','Maintain your own employee contact information. Role, login name and assigned branch remain administrator-controlled.')}
+ ${panel('Personal information',`<div id="profileContents">${msg('Loading your account...')}</div>`,'user')}`;
+}
+async function loadProfile(){
+ try{
+  const p=await api('/api/profile');if(view!=='profile')return;
+  $('#profileContents').innerHTML=`<div class="profile-summary"><div><span>Username</span><strong>${E(p.username)}</strong></div><div><span>Role</span><strong>${E(p.role)}</strong></div><div><span>Assigned branch</span><strong>${E(p.role==='admin'?'All branches':branchName(p.branch))}</strong></div></div>
+  <form id="profileForm" class="db-form"><div class="db-grid">
+   ${field('Full name',`<input name="full_name" class="db-input" maxlength="100" required value="${E(p.full_name)}">`)}
+   ${field('Email',`<input name="email" type="email" maxlength="200" class="db-input" value="${E(p.email)}" placeholder="name@example.com">`)}
+   ${field('Phone number',`<input name="phone" type="tel" maxlength="35" class="db-input" value="${E(p.phone)}" placeholder="+964 ...">`)}
+   ${field('Age',`<input name="age" type="number" min="0" max="120" step="1" class="db-input" value="${p.age==null?'':E(p.age)}">`)}
+   ${field('Job title',`<input name="job_title" class="db-input" maxlength="100" value="${E(p.job_title)}" placeholder="Pharmacist / Warehouse employee">`)}
+   </div><button type="submit" class="db-btn">Save my information</button></form><p class="muted-hint profile-help">Your personal contact information is accessible to your account and the system database. Password changes are under Settings.</p>`;
+  window.HWLang?.apply();
+ }catch(err){toast(err.message,'error')}
+}
 // Old links to #batches redirect to the combined Inventory screen.
 function batches(){return inventory()}
 function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Warehouse intake</option><option value="OUT">Warehouse dispatch</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
@@ -668,13 +743,13 @@ function filterStatement(){
 function settings(){return `${head('Settings and account security','Update your own password. Management can also review a separate audit trail.')}
 ${panel('Change your password',`<form id="passwordForm" class="db-form" style="max-width:530px"><div class="db-grid">${field('Current password',inp('current_password','','password','required autocomplete="current-password"'))}${field('New password (8+ characters)',inp('new_password','','password','required minlength="8" autocomplete="new-password"'))}</div><button type="submit" class="db-btn" style="justify-self:start">Update password</button></form>`,'lock')}
 ${can('item_write')?panel('Operations audit trail',`<div id="auditLog">Loading events...</div>`,'history'):''}`}
-const pages={overview,inventory,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
+const pages={overview,inventory,item_movement:itemMovements,profile:profilePage,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
 function showPage(next){
  if(next==='batches')next='inventory';
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup')))next='overview';
  closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
  $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
- if(next==='settings'&&can('item_write'))loadAudit();
+ if(next==='settings'&&can('item_write'))loadAudit();if(next==='profile')loadProfile();
  window.scrollTo({top:0,behavior:'instant'});
 }
 function route(next){location.hash=next;showPage(next)}
@@ -684,6 +759,20 @@ function modalOpen(title,description,fields,formType,button='Save changes'){
  modal.classList.add('open');modal.setAttribute('aria-hidden','false');syncUserBranchField($('#entityForm'));window.HWLang?.apply();$('.db-input',modal)?.focus();
 }
 function modalClose(){const el=$('#entityModal');el.classList.remove('open');el.innerHTML='';el.setAttribute('aria-hidden','true')}
+function openingLotRow(index){
+ return `<div class="opening-lot-row" data-opening-lot><div class="opening-lot-header"><strong>الوجبة ${N(index+1)} · Opening lot</strong><button class="db-btn secondary small" type="button" data-remove-opening-lot title="Remove this lot" ${index===0?'disabled':''}>Remove</button></div><div class="db-grid opening-balance-grid">
+ ${field('Batch / lot number',`<input data-opening-key="batch_no" class="db-input" maxlength="90" placeholder="e.g. LOT-001" required>`)}
+ ${field('Manufacture date (optional)',`<input data-opening-key="manufacture_date" class="db-input" type="date">`)}
+ ${field('Expiration date',`<input data-opening-key="expiry_date" class="db-input" type="date" required>`)}
+ ${field('Opening quantity',`<input data-opening-key="opening_qty" class="db-input" type="number" min="1" max="100000000" step="1" inputmode="numeric" required>`)}
+ ${field('Price — دينار',`<input data-opening-key="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" required>`)}
+ ${field('Price — فلس',`<input data-opening-key="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" required>`)}
+ </div></div>`;
+}
+function refreshOpeningLotNumbers(form){
+ const rows=$$('[data-opening-lot]',form);
+ rows.forEach((row,i)=>{row.querySelector('.opening-lot-header strong').textContent=`الوجبة ${N(i+1)} · Opening lot`;row.querySelector('[data-remove-opening-lot]').disabled=rows.length===1;});
+}
 function editItem(it=null){
  const b=it?.branch||user.branch||'';
  const legacyWarn=it?.category&&!approvedBook(it.branch,it.category)?`<small class="legacy-book-warning">Existing category: ${E(it.category)} — please choose an approved book for this branch.</small>`:'';
@@ -695,7 +784,7 @@ function editItem(it=null){
   wide(field('Item name',`<input name="name" class="db-input" maxlength="160" value="${E(it?.name||'')}" placeholder="Name of the supply / instrument">`)).replace('class="db-field wide"','class="db-field wide" data-other-name'),
   field('Stock unit',`<select name="unit" class="db-select" data-item-unit required>${unitOptions(b,it?.unit||'')}</select>`),
   field('Book / register category',`<select name="category" class="db-select" data-item-book required>${optionsForBooks(b,it?.category||'')}</select>${legacyWarn}`),
-  field('Manufacture date (optional)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`),
+  ...(it?[field('Manufacture date (reference)',`<input name="manufacture_date" class="db-input" type="date" value="${E(it?.manufacture_date||'')}">`)]:[]),
   field('Manufacturer company',`<input name="manufacturer" class="db-input" maxlength="160" value="${E(it?.manufacturer||'')}" placeholder="Company name">`),
   wide(field('Annual requirement quantity',`<input name="annual_need" class="db-input" type="number" min="0" max="1000000000" step="1" inputmode="numeric" value="${it?.annual_need==null?'':E(it.annual_need)}" placeholder="${window.HWLang?.get()==='ar'?'الاحتياج خلال سنة كاملة':'Yearly quantity in stock units'}">`, 'Optional. Used for scarce and surplus reports.')),
   wide(field('Information / alternate names',`<textarea name="information" class="db-textarea" maxlength="2000" rows="4" placeholder="Common names, Iraqi slang, abbreviations, alternate spellings...">${E(it?.information||'')}</textarea>`, 'All alternate names are searchable.'))
@@ -710,19 +799,18 @@ function editItem(it=null){
   f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
  }else{
   f.push(`<div class="db-field wide opening-balance-choice"><label class="opening-balance-label"><input type="checkbox" name="opening_balance" value="1" data-opening-balance><span>Opening balance</span></label><small>Tick only for stock already physically in the warehouse. The opening quantity will be recorded once in movement history.</small></div>`);
-  f.push(`<div class="opening-balance-fields wide" data-opening-fields hidden><div class="opening-balance-heading">Opening stock details</div><div class="db-grid opening-balance-grid">
-   ${field('Opening quantity',`<input name="opening_qty" class="db-input" type="number" min="1" max="100000000" step="1" inputmode="numeric" placeholder="0" disabled>`)}
-   ${field('Batch / lot number',`<input name="batch_no" class="db-input" maxlength="90" placeholder="e.g. LOT-001" disabled>`)}
-   ${field('Expiration date',`<input name="expiry_date" class="db-input" type="date" disabled>`)}
-   ${field('Price — دينار',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" placeholder="0" disabled>`)}
-   ${field('Price — فلس',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" placeholder="0–999" disabled>`)}
-   </div><small class="opening-balance-hint">This is recorded as رصيد افتتاحي (opening stock), not a received shipment. All five fields are required.</small></div>`);
+  f.push(`<div class="opening-balance-fields wide" data-opening-fields hidden>
+    <div class="opening-balance-heading">Opening stock — multiple batches</div>
+    <div id="openingLotRows">${openingLotRow(0)}</div>
+    <button type="button" class="db-btn secondary small" data-add-opening-lot>+ Add another batch</button>
+    <small class="opening-balance-hint">Enter each stored lot separately. The opening balance is recorded as one audited transaction; individual batch numbers, manufacturing dates, expiry dates, quantities and prices remain separate.</small>
+   </div>`);
  }
  modalOpen(it?'Edit item':'Register item',it?'Edit the registered details without changing historical received or opening quantities.':'Register an item without stock, or tick رصيد افتتاحي to record existing physical stock in one step.',f.join(''),`item:${it?.id||'new'}`);
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.16</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.17</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
  syncOpeningBalanceFields(form);
  window.HWLang?.apply();
@@ -733,7 +821,7 @@ function syncOpeningBalanceFields(form){
  if(!checkbox||!wrap)return;
  const on=checkbox.checked;
  wrap.hidden=!on;
- wrap.querySelectorAll('input').forEach(el=>{el.disabled=!on;el.required=on;});
+ wrap.querySelectorAll('input').forEach(el=>{el.disabled=!on;el.required=on && el.dataset.openingKey!=='manufacture_date';});
 }
 function syncItemBranchFields(form, previousBook='', previousUnit=''){
  if(!form?.dataset.entity?.startsWith('item:'))return;
@@ -819,6 +907,11 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
   return;
  }
  let createdItem=null;
+ if(entity==='item' && id==='new' && form.querySelector('[data-opening-balance]')?.checked){
+  d.opening_lots=$$('[data-opening-lot]',form).map(row=>{
+   const lot={};$$('[data-opening-key]',row).forEach(input=>lot[input.dataset.openingKey]=input.value.trim());return lot;
+  });
+ }
  if(entity==='item'){if(id!=='new')d.active=d.active==='1';createdItem=await api(id==='new'?'/api/items':'/api/items/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='department'){if(id!=='new')d.active=d.active==='1';await api(id==='new'?'/api/departments':'/api/departments/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='user'){if(id!=='new')d.is_active=d.is_active==='1';await api(id==='new'?'/api/users':'/api/users/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
@@ -883,6 +976,10 @@ document.addEventListener('click',async e=>{
  if(e.target.closest('[data-column-default]')){columnChangeAll('default');return;}
  if(e.target.closest('[data-save-column-manager]')){saveColumnManager();return;}
  if(e.target.id==='columnManager'){closeColumnManager();return;}
+ if(e.target.closest('[data-close-shipment-history]')||e.target.id==='movementDetailModal'){closeShipmentHistory();return;}
+ const inspectItem=e.target.closest('[data-open-item-shipments]');if(inspectItem){await openShipmentHistory('item',Number(inspectItem.dataset.openItemShipments));return;}
+ const inspectDept=e.target.closest('[data-open-dept-shipments]');if(inspectDept){await openShipmentHistory('department',Number(inspectDept.dataset.openDeptShipments));return;}
+ const moreShipments=e.target.closest('[data-more-shipments]');if(moreShipments){await loadShipmentHistory(Number(moreShipments.dataset.moreShipments));return;}
  const history=e.target.closest('[data-load-item-history]');if(history){await loadItemHistory(Number(history.dataset.loadItemHistory),Number(history.dataset.historyOffset)||0);return;}
  const statement=e.target.closest('[data-statement]');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
  if(e.target.closest('[data-reset-statement-expiry]')){statementExpiryBefore='';try{await reloadPositions()}catch(err){toast(err.message,'error')}return;}
@@ -894,6 +991,15 @@ document.addEventListener('click',async e=>{
  const pending=e.target.closest('[data-complete-paperwork]');if(pending){completeMovementPapers(cache.movements.find(m=>m.id===Number(pending.dataset.completePaperwork)));return}
  const inline=e.target.closest('[data-inline-item]');
  if(inline){inlineNewItem={mode:inline.dataset.inlineItem,line:inline.closest('.ship-line')};editItem();return}
+ const addOpening=e.target.closest('[data-add-opening-lot]');if(addOpening){
+  const form=addOpening.closest('#entityForm'),rows=form?.querySelector('#openingLotRows');if(!rows)return;
+  if(rows.children.length>=40){toast('Maximum 40 opening lots per registration','error');return;}
+  rows.insertAdjacentHTML('beforeend',openingLotRow(rows.children.length));refreshOpeningLotNumbers(form);window.HWLang?.apply();return;
+ }
+ const removeOpening=e.target.closest('[data-remove-opening-lot]');if(removeOpening){
+  const row=removeOpening.closest('[data-opening-lot]'),form=removeOpening.closest('#entityForm');
+  if($$('[data-opening-lot]',form).length>1){row.remove();refreshOpeningLotNumbers(form)}return;
+ }
  const n=e.target.closest('[data-new]');if(n){inlineNewItem=null;if(n.dataset.new==='item')editItem();if(n.dataset.new==='dept')editDept();if(n.dataset.new==='user')createUser();return}
  const item=e.target.closest('[data-edit-item]');if(item){editItem(cache.items.find(x=>x.id===Number(item.dataset.editItem)));return}
  const dep=e.target.closest('[data-edit-dept]');if(dep){editDept(cache.departments.find(x=>x.id===Number(dep.dataset.editDept)));return}
@@ -906,13 +1012,17 @@ document.addEventListener('click',async e=>{
  if(e.target.closest('#downloadBackup')){downloadBackup();return}
 });
 document.addEventListener('submit',async e=>{
- const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','restoreForm'].includes(form.id))return;
+ const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','profileForm','restoreForm'].includes(form.id))return;
  e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
  try{
   if(form.id==='entityForm')await submitEntity(form);
   if(form.id==='receiveForm')await postShipment('IN',form,extractLines($('#receiptLines'),$('#receiptLines').dataset.returnMode==='1'?'issue':'receive'));
   if(form.id==='issueForm')await postShipment('OUT',form,extractLines($('#issueLines'),'issue'));
   if(form.id==='adjustForm')await postShipment(new FormData(form).get('kind'),form,extractLines($('#adjustLines'),'issue'));
+  if(form.id==='profileForm'){
+   const p=await api('/api/profile',{method:'PATCH',data:Object.fromEntries(new FormData(form).entries())});
+   user.full_name=p.full_name;$('#userName').textContent=p.full_name;toast('Your profile was saved.');
+  }
   if(form.id==='passwordForm'){await api('/api/change-password',{method:'POST',data:Object.fromEntries(new FormData(form).entries())});user.must_change_password=false;form.reset();toast('Password updated and other sessions revoked')}
   if(form.id==='restoreForm'){
    const fd=new FormData(form);const confirmation=String(fd.get('confirmation')||'');fd.delete('confirmation');
@@ -937,6 +1047,7 @@ document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInvent
  if(e.target.id==='columnManagerSearch')searchColumnOptions(e.target.value);
  if(e.target.id==='movementFilter')filterMovements();
  if(e.target.id==='departmentFilter')filterDepartmentTable();
+ if(e.target.id==='itemMovementSearch')filterItemMovements();
  if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
  if(e.target.matches('[data-dept-search]'))filterDeptPicker(e.target.closest('[data-dept-picker]'));});
 document.addEventListener('change',async e=>{
@@ -991,7 +1102,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Enter'||e.key===' '){selectDepartment(picker,option);e.preventDefault();return;}
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){const matches=[...picker.querySelectorAll('[data-dept-option]')].filter(el=>!el.hidden);const i=matches.indexOf(option);matches[Math.max(0,Math.min(matches.length-1,i+(e.key==='ArrowDown'?1:-1)))]?.focus();e.preventDefault();return;}
  }
- if(e.key==='Escape'){modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
+ if(e.key==='Escape'){closeShipmentHistory();modalClose();inlineNewItem=null;closeMenu();$('#accountMenu').classList.remove('open')}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus()}});
 (async function boot(){try{
  user=await api('/api/me');csrf=user.csrf;
  $('#userName').textContent=user.full_name;$('#userRole').textContent=user.role[0].toUpperCase()+user.role.slice(1);

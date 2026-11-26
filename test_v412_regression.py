@@ -6,7 +6,7 @@ from department_catalog import DEFAULT_DEPARTMENTS
 with tempfile.TemporaryDirectory() as tmp:
     os.environ['WAREHOUSE_DATA_DIR'] = tmp
     from app import app, DB, init_db, SCHEMA_VERSION, APP_RELEASE
-    assert SCHEMA_VERSION == 8 and APP_RELEASE == '4.16.0'
+    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.17.0'
     with TestClient(app) as t:
         def good(r):
             assert r.status_code == 200, (r.status_code, r.text)
@@ -76,15 +76,15 @@ with tempfile.TemporaryDirectory() as tmp:
         # Exports and restores preserve renamed departments, batch prices, issue snapshots.
         backup=t.get('/api/backup/export');assert backup.status_code==200
         with zipfile.ZipFile(io.BytesIO(backup.content)) as z:
-            assert json.loads(z.read('manifest.json'))['schema_version']==8
+            assert json.loads(z.read('manifest.json'))['schema_version']==9
         good(t.post('/api/backup/restore',headers={**h,'X-Restore-Confirmation':'RESTORE'},files={'backup':('w.zip',backup.content,'application/zip')}))
         good(t.post('/api/login',json={'username':'enki','password':'123'}))
         deps=good(t.get('/api/departments'))
         assert len(deps)==60 and 'وحدة المفراس' not in {x['name'] for x in deps}
         assert next(m for m in good(t.get('/api/movements')) if m['id']==issue['id'])['lines'][0]['unit_price_fils']==1350500
-        assert good(t.get('/api/health'))['release']=='4.16.0'
+        assert good(t.get('/api/health'))['release']=='4.17.0'
         js=good(t.get('/api/health'))
-        assert js['version']==8
+        assert js['version']==9
         html=t.get('/static/live.js').text
         assert 'data-issue-product' in html and 'data-issue-expiry' in html and 'data-dept-search' in html
         assert 'returnForm' not in html and 'deptOptions()' not in html

@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as work:
     os.environ['WAREHOUSE_DATA_DIR']=work
     os.environ.pop('WAREHOUSE_PUBLIC_DEPLOY',None)
     from app import app, APP_RELEASE, SCHEMA_VERSION, db
-    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.16.0', 8)
+    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.17.0', 9)
     with TestClient(app) as c:
         def good(r):
             assert r.status_code == 200, (r.status_code,r.text[:600]); return r.json()
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory() as work:
         export=c.get('/api/backup/export');assert export.status_code==200
         with zipfile.ZipFile(io.BytesIO(export.content)) as z:
             assert set(z.namelist())=={'manifest.json','warehouse.sqlite3'}
-            assert json.loads(z.read('manifest.json'))['schema_version']==8
+            assert json.loads(z.read('manifest.json'))['schema_version']==9
         restored=good(c.post('/api/backup/restore',files={'backup':('test_backup.zip',export.content,'application/zip')},headers={**h,'X-Restore-Confirmation':'RESTORE'}))
         assert restored['ok']
         # Restore resets login sessions.

@@ -49,9 +49,9 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.16.0'
+APP_RELEASE = '4.17.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -190,6 +190,74 @@ def percent_parameter(raw, field):
         err(422, f'{field} must be above zero and at most 1000%')
     return value
 
+
+
+def migrate_v9(c: sqlite3.Connection):
+    """Add lot-specific manufacture date and private employee profile fields.
+
+    Existing lots and log records are never rewritten; all columns are optional.
+    """
+    lot_cols = {r[1] for r in c.execute('PRAGMA table_info(batches)')}
+    if 'manufacture_date' not in lot_cols:
+        c.execute('ALTER TABLE batches ADD COLUMN manufacture_date TEXT')
+    user_cols = {r[1] for r in c.execute('PRAGMA table_info(users)')}
+    for name, definition in (
+        ('email', "TEXT NOT NULL DEFAULT ''"),
+        ('phone', "TEXT NOT NULL DEFAULT ''"),
+        ('age', 'INTEGER CHECK(age >= 0 AND age <= 120)'),
+        ('job_title', "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in user_cols:
+            c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
+    # Read-only movement timelines need indexed lookups as the ledger grows.
+    c.execute('CREATE INDEX IF NOT EXISTS idx_batches_item_v9 ON batches(item_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lines_batch_v9 ON movement_lines(batch_id,movement_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_lines_movement_v9 ON movement_lines(movement_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_movements_department_v9 ON movements(department_id,created_at)')
+    c.execute("INSERT INTO app_meta(key,value) VALUES ('schema_version',?) "
+              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
+def opening_lot_details(data):
+    """Validate each physical opening lot before starting a DB transaction."""
+    raw = data.get('opening_lots')
+    if raw is None:
+        # Preserve the original V4.16 one-lot request for old clients.
+        raw = [data]
+    if not isinstance(raw, list) or not (1 <= len(raw) <= 40):
+        err(422, 'Opening balance needs between 1 and 40 lots')
+    result = []
+    for index, row in enumerate(raw, 1):
+        if not isinstance(row, dict):
+            err(422, f'Opening lot {index} is invalid')
+        batch = validated_text(row, 'batch_no', max_len=90)
+        expiry = dated(row.get('expiry_date'), f'Opening lot {index} expiry_date')
+        manufacture = dated(row.get('manufacture_date'), f'Opening lot {index} manufacture_date')
+        if not expiry:
+            err(422, f'Opening lot {index} requires an expiry date')
+        if manufacture and manufacture > expiry:
+            err(422, f'Opening lot {index}: manufacture date is after expiry')
+        qty = integer(row, 'opening_qty', 1, 100_000_000)
+        price = price_from_fields(row)
+        result.append({'batch_no':batch, 'expiry_date':expiry,
+                       'manufacture_date':manufacture, 'qty':qty,
+                       'unit_price_fils':price})
+    return result
+
+
+def validate_profile(data):
+    name = validated_text(data, 'full_name', max_len=100)
+    email = validated_text(data, 'email', required=False, max_len=200)
+    if email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        err(422, 'Enter a valid email address')
+    phone = validated_text(data, 'phone', required=False, max_len=35)
+    if phone and not re.fullmatch(r'[+0-9\s()\-]{5,35}', phone):
+        err(422, 'Phone number contains unsupported characters')
+    age = None
+    if data.get('age') not in (None, ''):
+        age = integer(data, 'age', 0, 120)
+    job_title = validated_text(data, 'job_title', required=False, max_len=100)
+    return name,email,phone,age,job_title
 
 def require_branch(value, *, allow_unassigned=False):
     """Only these three branches can own inventory; NULL marks legacy records."""
@@ -426,7 +494,11 @@ def init_db():
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
                 must_change_password INTEGER NOT NULL DEFAULT 0,
                 branch TEXT CHECK(branch IN ('medication','medical_supplies','surgical_instruments') OR branch IS NULL),
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                email TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                age INTEGER CHECK(age >= 0 AND age <= 120),
+                job_title TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS sessions (
                 token_hash TEXT PRIMARY KEY,
@@ -468,7 +540,8 @@ def init_db():
                 expiry_date TEXT,
                 on_hand INTEGER NOT NULL DEFAULT 0 CHECK(on_hand>=0),
                 created_at TEXT NOT NULL,
-                unit_price_fils INTEGER CHECK(unit_price_fils >= 0)
+                unit_price_fils INTEGER CHECK(unit_price_fils >= 0),
+                manufacture_date TEXT
             );
             CREATE TABLE IF NOT EXISTS movements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -514,6 +587,7 @@ def init_db():
         migrate_shipment_routes(c)
         migrate_per_receipt_pricing_and_transfer_authorization(c)
         migrate_annual_need(c)
+        migrate_v9(c)
         seed_default_departments(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
@@ -677,6 +751,29 @@ def me(request: Request):
             'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'permissions': sorted(WRITE_PERMS[u['role']])}
 
 
+
+@app.get('/api/profile')
+def get_profile(request: Request):
+    u = get_user(request)
+    with db(readonly=True) as c:
+        row = c.execute('''SELECT id,username,full_name,role,branch,email,phone,age,job_title
+            FROM users WHERE id=?''', (u['id'],)).fetchone()
+        if not row:
+            err(404, 'Account no longer exists')
+        return dict(row)
+
+
+@app.patch('/api/profile')
+async def save_profile(request: Request):
+    u = get_user(request, require_csrf=True)
+    data = await request.json()
+    name,email,phone,age,job_title = validate_profile(data)
+    with db() as c:
+        c.execute('''UPDATE users SET full_name=?,email=?,phone=?,age=?,job_title=? WHERE id=?''',
+                  (name,email,phone,age,job_title,u['id']))
+        audit(c,u['id'],'PROFILE_UPDATED', {'updated_fields':['full_name','email','phone','age','job_title']})
+    return {'ok':True,'full_name':name}
+
 @app.post('/api/logout')
 def logout(request: Request):
     u = get_user(request, require_csrf=True)
@@ -713,7 +810,10 @@ async def change_password(request: Request):
 def list_departments(request: Request):
     get_user(request)
     with db(readonly=True) as c:
-        return [dict(x) for x in c.execute('SELECT * FROM departments ORDER BY active DESC,name')]
+        return [dict(x) for x in c.execute('''SELECT d.*,
+            (SELECT MAX(m.created_at) FROM movements m WHERE m.department_id=d.id AND m.kind IN ('IN','OUT','RETURN')) AS last_shipment_at,
+            (SELECT COUNT(*) FROM movements m WHERE m.department_id=d.id AND m.kind IN ('IN','OUT','RETURN')) AS shipment_count
+            FROM departments d ORDER BY d.active DESC,d.name''')]
 
 
 @app.post('/api/departments')
@@ -791,15 +891,16 @@ async def create_item(request: Request):
     sku = validated_text(d, 'sku', required=False, max_len=50).upper() or make_sku(branch)
     generic, manufacturer, mfg, exp, info = item_details(d)
     opening_balance = boolean_flag(d.get('opening_balance'), 'opening_balance')
-    opening_qty = None
+    opening_lots = []
     if opening_balance:
-        # A physical opening balance is a recorded stock movement, never an
-        # untraceable edit to on_hand or a fictional incoming purchase receipt.
-        batch_no = validated_text(d, 'batch_no', max_len=90)
-        if not exp:
-            err(422, 'Opening balance requires a lot expiry date')
-        opening_qty = integer(d, 'opening_qty', 1, 100_000_000)
-        unit_price = price_from_fields(d)
+        # All opening lots are validated up front and written atomically.
+        opening_lots = opening_lot_details(d)
+        # Multiple lot-specific values must not be misrepresented as one
+        # catalog reference date or unit price.
+        batch_no = opening_lots[0]['batch_no'] if len(opening_lots)==1 else ''
+        exp = opening_lots[0]['expiry_date'] if len(opening_lots)==1 else None
+        mfg = opening_lots[0]['manufacture_date'] if len(opening_lots)==1 else mfg
+        unit_price = opening_lots[0]['unit_price_fils'] if len(opening_lots)==1 else None
     else:
         # New forms omit all lot details unless opening stock is checked.
         # Older API clients may still submit catalog *reference* lot/price
@@ -818,36 +919,44 @@ async def create_item(request: Request):
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (sku,name,cat,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,annual_need,now()))
             opening_batch_id = None
+            opening_batch_ids = []
             opening_code = None
             if not opening_balance and batch_no:
-                # Legacy reference-only item registration: no stock or
-                # inbound receipt is fabricated (zero quantity).
+                # Legacy reference-only catalog registration with zero stock.
                 c.execute('''INSERT INTO batches(item_id,batch_no,expiry_date,created_at,unit_price_fils)
                     VALUES(?,?,?,?,?)''', (q.lastrowid,batch_no,exp,now(),unit_price))
             if opening_balance:
-                # One atomic transaction: catalog entry + lot + positive ledger
-                # movement + audit record. No additional incoming receipt needed.
-                opening_batch_id = c.execute('''INSERT INTO batches(item_id,batch_no,expiry_date,on_hand,created_at,unit_price_fils)
-                    VALUES(?,?,?,?,?,?)''', (q.lastrowid,batch_no,exp,opening_qty,now(),unit_price)).lastrowid
+                # One movement for the complete initial count, with one
+                # movement line and stored stock lot per distinct lot entry.
                 move = c.execute('''INSERT INTO movements(code,kind,paper_ref,source,notes,route,created_by,created_at)
                     VALUES(?,?,?,?,?,?,?,?)''', ('TEMP-'+secrets.token_hex(6),'ADJUST_PLUS','OPENING-BALANCE',
-                    'رصيد افتتاحي','Initial physical stock recorded on item registration',
+                    'رصيد افتتاحي','Initial counted inventory (multiple lots supported)',
                     'opening_balance',u['id'],now()))
                 opening_code = f'OPEN-{move.lastrowid:06d}'
                 c.execute('UPDATE movements SET code=? WHERE id=?', (opening_code,move.lastrowid))
-                c.execute('''INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils)
-                    VALUES(?,?,?,?,?)''', (move.lastrowid,opening_batch_id,opening_qty,1,unit_price))
+                for lot in opening_lots:
+                    bid = c.execute('''INSERT INTO batches(item_id,batch_no,expiry_date,on_hand,created_at,unit_price_fils,manufacture_date)
+                        VALUES(?,?,?,?,?,?,?)''', (q.lastrowid,lot['batch_no'],lot['expiry_date'],
+                        lot['qty'],now(),lot['unit_price_fils'],lot['manufacture_date'])).lastrowid
+                    opening_batch_ids.append(bid)
+                    c.execute('''INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils)
+                        VALUES(?,?,?,?,?)''', (move.lastrowid,bid,lot['qty'],1,lot['unit_price_fils']))
+                opening_batch_id = opening_batch_ids[0]
                 audit(c,u['id'],'OPENING_BALANCE_CREATED',{
                     'item_id':q.lastrowid,'movement_id':move.lastrowid,'code':opening_code,
-                    'batch_id':opening_batch_id,'batch_no':batch_no,'expiry_date':exp,
-                    'quantity':opening_qty,'unit_price_fils':unit_price,'branch':branch})
+                    'batch_id':opening_batch_id,'batch_ids':opening_batch_ids,
+                    'batch_no':opening_lots[0]['batch_no'] if len(opening_lots)==1 else '',
+                    'expiry_date':opening_lots[0]['expiry_date'] if len(opening_lots)==1 else None,
+                    'quantity':sum(lot['qty'] for lot in opening_lots),
+                    'unit_price_fils':opening_lots[0]['unit_price_fils'] if len(opening_lots)==1 else None,
+                    'lot_count':len(opening_lots), 'lots':opening_lots,'branch':branch})
             audit(c, u['id'], 'ITEM_CREATED', {'id':q.lastrowid,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':cat,'unit':unit,'initial_batch_no':batch_no,
                   'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,
                   'price_fils':unit_price,'annual_need':annual_need,'opening_balance':opening_balance,
                   'opening_movement_code':opening_code})
             return {'ok': True, 'id': q.lastrowid, 'sku':sku, 'opening_balance':opening_balance,
-                    'opening_batch_id':opening_batch_id,'opening_movement_code':opening_code}
+                    'opening_batch_id':opening_batch_id,'opening_batch_ids':opening_batch_ids,'opening_movement_code':opening_code}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
 
@@ -909,7 +1018,7 @@ async def update_item(item_id: int, request: Request):
 def batches(request: Request):
     get_user(request)
     with db(readonly=True) as c:
-        return [dict(x) for x in c.execute('''SELECT b.id,b.item_id,b.batch_no,b.expiry_date,b.on_hand,b.unit_price_fils,
+        return [dict(x) for x in c.execute('''SELECT b.id,b.item_id,b.batch_no,b.expiry_date,b.manufacture_date,b.on_hand,b.unit_price_fils,
                                              i.sku,i.name item_name,i.unit,i.category,i.branch,i.active item_active
                                              FROM batches b JOIN items i ON i.id=b.item_id
                                              ORDER BY b.on_hand DESC,i.name,b.expiry_date''')]
@@ -932,7 +1041,7 @@ def item_full_history(item_id: int, request: Request, limit: int = 50, offset: i
                               JOIN batches b ON b.id=ml.batch_id
                               WHERE b.item_id=?""", (item_id,)).fetchone()['n']
         rows = c.execute("""SELECT ml.id,ml.qty,ml.direction,ml.unit_price_fils,
-                                  b.batch_no,b.expiry_date,m.code,m.kind,m.route,
+                                  b.batch_no,b.expiry_date,b.manufacture_date,m.code,m.kind,m.route,
                                   m.created_at,m.paper_ref,m.dispatch_ref,m.source,
                                   m.external_destination,d.name AS department_name,
                                   u.username AS operator
@@ -946,6 +1055,57 @@ def item_full_history(item_id: int, request: Request, limit: int = 50, offset: i
         return {'item_id':item_id, 'total':count, 'offset':offset,
                 'limit':limit,'rows':[dict(r) for r in rows]}
 
+
+
+def shipment_history_page(c, *, item_id=None, department_id=None, limit=30, offset=0):
+    """Return document headers with all their lines, ordered newest first."""
+    if not isinstance(limit,int) or not isinstance(offset,int) or not 1<=limit<=100 or offset<0:
+        err(422, 'Invalid history page')
+    if item_id is not None:
+        exists = c.execute('SELECT 1 FROM items WHERE id=?', (item_id,)).fetchone()
+        if not exists: err(404, 'Item not found')
+        where = """m.id IN (SELECT l.movement_id FROM movement_lines l
+                        JOIN batches b ON l.batch_id=b.id WHERE b.item_id=?)"""
+        args = (item_id,)
+    else:
+        exists = c.execute('SELECT 1 FROM departments WHERE id=?', (department_id,)).fetchone()
+        if not exists: err(404, 'Department not found')
+        where = 'm.department_id=?'
+        args = (department_id,)
+    total = c.execute(f'SELECT COUNT(*) AS n FROM movements m WHERE {where}', args).fetchone()['n']
+    records = [dict(r) for r in c.execute(f"""SELECT m.*,d.name AS department_name,u.username AS operator
+        FROM movements m LEFT JOIN departments d ON m.department_id=d.id
+        JOIN users u ON m.created_by=u.id
+        WHERE {where} ORDER BY m.id DESC LIMIT ? OFFSET ?""", (*args,limit,offset))]
+    if records:
+        ids = [r['id'] for r in records]
+        placeholders = ','.join('?' for _ in ids)
+        lines = c.execute(f"""SELECT ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,
+            i.id AS item_id,i.sku,i.name AS item_name,i.trade_name,i.unit,
+            b.id AS lot_id,b.batch_no,b.expiry_date,b.manufacture_date
+            FROM movement_lines ml
+            JOIN batches b ON b.id=ml.batch_id JOIN items i ON i.id=b.item_id
+            WHERE ml.movement_id IN ({placeholders}) ORDER BY ml.id""", ids).fetchall()
+        grouped = {}
+        for row in lines:
+            grouped.setdefault(row['movement_id'],[]).append(dict(row))
+        for record in records:
+            record['lines'] = grouped.get(record['id'],[])
+    return {'total':total, 'limit':limit, 'offset':offset, 'shipments':records}
+
+
+@app.get('/api/items/{item_id}/shipments')
+def item_shipments(item_id: int, request: Request, limit: int = 30, offset: int = 0):
+    get_user(request)
+    with db(readonly=True) as c:
+        return shipment_history_page(c, item_id=item_id, limit=limit, offset=offset)
+
+
+@app.get('/api/departments/{department_id}/shipments')
+def department_shipments(department_id: int, request: Request, limit: int = 30, offset: int = 0):
+    get_user(request)
+    with db(readonly=True) as c:
+        return shipment_history_page(c, department_id=department_id, limit=limit, offset=offset)
 
 @app.get('/api/movements')
 def movements(request: Request):
@@ -961,7 +1121,7 @@ def movements(request: Request):
         ids = [x['id'] for x in res]
         if ids:
             ph = ','.join('?' for _ in ids)
-            lines = [dict(x) for x in c.execute(f'''SELECT ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,b.batch_no,b.expiry_date,
+            lines = [dict(x) for x in c.execute(f'''SELECT ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,b.batch_no,b.expiry_date,b.manufacture_date,
                              i.sku,i.name item_name,i.unit FROM movement_lines ml
                              JOIN batches b ON b.id=ml.batch_id JOIN items i ON i.id=b.item_id
                              WHERE ml.movement_id IN ({ph}) ORDER BY ml.id''', ids)]
@@ -1569,6 +1729,11 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
             else:
                 if 'annual_need' not in {r[1] for r in verify.execute('PRAGMA table_info(items)')}:
                     err(422, 'Backup declares V8 but is missing annual requirement field')
+            if version < 9:
+                migrate_v9(verify)
+            else:
+                if 'manufacture_date' not in {r[1] for r in verify.execute('PRAGMA table_info(batches)')} or not {'email','phone','age','job_title'}.issubset({r[1] for r in verify.execute('PRAGMA table_info(users)')}):
+                    err(422, 'Backup declares V9 but is missing lot manufacturing or profile columns')
             seed_default_departments(verify)  # Older backups gain starter departments without deleting user records.
             verify.commit()
         except sqlite3.DatabaseError:
