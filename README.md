@@ -1,4 +1,4 @@
-# Hospital Warehouse IMS — V4.13
+# Hospital Warehouse IMS — V4.14
 
 Read V4_13_CHANGES.md for the combined inventory, expandable lot details, configurable columns and per-item movement history.
 
@@ -39,3 +39,5 @@ python test_v412_regression.py
 ```
 
 Each test uses its own temporary data directory; the scripts must not be run against a live Railway database. A V4.11 in-place migration and V4.11 ZIP backup restoration were also tested separately. The local browser preview was blocked in this environment, so review the live visual layout after deployment.
+
+See V4_14_CHANGES.md for the latest UI fixes.

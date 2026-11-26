@@ -38,6 +38,15 @@
     if(m)return `تم حفظ الحركة ${m[1]} وتحديث رصيد المخزن.`;
     m=s.match(/^(.+) · Batch ([^·]+) · (.+) · Exp (.+)$/);
     if(m)return `${m[1]} · تشغيلة ${m[2]} · ${m[3]} · الصلاحية ${m[4]}`;
+    // V4.14 dynamically generated captions retain product names and IDs.
+    m=s.match(/^All stored lots — (.+)$/);
+    if(m)return 'جميع الوجبات المخزنة — '+m[1];
+    m=s.match(/^Lot ID (\d+)$/);
+    if(m)return 'معرّف الوجبة '+m[1];
+    m=s.match(/^([\d,]+) available$/);
+    if(m)return m[1]+' عمود متاح';
+    m=s.match(/^View all ([\d,]+) stored lots$/);
+    if(m)return 'عرض جميع الوجبات المخزنة ('+m[1]+')';
     // V4.13 count text on detailed Inventory / المواقف tables.
     m=s.match(/^([\d,]+) of ([\d,]+) items · ([\d,]+) matching records$/);
     if(m)return `${m[1]} من أصل ${m[2]} صنف · ${m[3]} سجل مطابق`;

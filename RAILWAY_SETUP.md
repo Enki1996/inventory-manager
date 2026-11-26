@@ -32,5 +32,7 @@ WAREHOUSE_BOOTSTRAP_ADMIN_PASSWORD=<strong unique password at least 14 character
 This application is for collaborative testing. It does not yet have the security and audit validation expected for real clinical/hospital operations. Downloaded backups are not encrypted and include password hashes: store them securely and test recovery. Keep independent off-site backups and protect the Railway account. For future multi-worker or hospital-wide use, plan a managed PostgreSQL migration.
 
 
-## V4.13 deployment
-This is a frontend/read-only API update. Keep the existing Railway application service and `/data` persistent volume. No database migration is required; `schema version = 8`. Verify `/api/health` includes `"release":"4.13.0"`.
+## V4.14 deployment
+This is a frontend/read-only API update. Keep the existing Railway application service and `/data` persistent volume. No database migration is required; `schema version = 8`. Verify `/api/health` includes `"release":"4.14.0"`.
+
+See V4_14_CHANGES.md for the latest UI fixes.

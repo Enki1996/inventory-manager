@@ -51,7 +51,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 8
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.13.0'
+APP_RELEASE = '4.14.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)

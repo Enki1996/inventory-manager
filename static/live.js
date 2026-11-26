@@ -1,4 +1,4 @@
-/* Live V4.13 bilingual warehouse application: all changes go through the server and SQLite database. */
+/* Live V4.14 bilingual warehouse application: all changes go through the server and SQLite database. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -33,14 +33,61 @@ const storedColumnState=(section,defaults)=>{
  return [...defaults];
 };
 const columnShown={inventory:storedColumnState('inventory',DEFAULT_INV_COLS),statements:storedColumnState('statements',DEFAULT_STMT_COLS)};
-function setColumnVisible(section,key,checked){
- const cols=columnShown[section];
- if(checked&&!cols.includes(key))cols.push(key);
- if(!checked&&cols.length>1)columnShown[section]=cols.filter(x=>x!==key);
+// V4.14: the old narrow dropdown is replaced by an accessible centered dialog.
+// Changes apply to the display only after Save; the database is never changed.
+const columnGroups=[
+ ['Basic item information',['name','branch','book','unit','generic','manufacturer','mfg','aliases','reference','status']],
+ ['Stock and expiry',['physical','usable','expired','unknown','lots','next']],
+ ['Pricing and requirements',['price','annual','percent','matched']],
+ ['Actions',['actions']]
+];
+const allowedColumns=section=>COLS.filter(([key])=>section==='statements'?key!=='actions':key!=='matched'&&key!=='percent').map(([key])=>key);
+let columnDialogSection='',columnDialogFocus=null;
+const columnPicker=section=>`<button type="button" class="db-btn secondary column-picker-launch" data-open-column-manager="${section}" aria-haspopup="dialog">Show / hide columns ⚙</button>`;
+function openColumnManager(section){
+ if(!['inventory','statements'].includes(section))return;
+ const root=$('#columnManager');if(!root)return;
+ columnDialogSection=section;columnDialogFocus=document.activeElement;
+ const allowed=allowedColumns(section),saved=columnShown[section];
+ const groups=columnGroups.map(([name,keys])=>{
+  const fields=keys.filter(k=>allowed.includes(k));
+  if(!fields.length)return '';
+  return `<section class="column-group"><h3>${E(name)}</h3><div class="column-options">${fields.map(k=>`<label class="column-option" data-column-label="${E(headerFor(k).toLowerCase())}"><input type="checkbox" data-column-choice="${k}" ${k==='name'?'disabled':''} ${k==='name'||saved.includes(k)?'checked':''}><span>${E(headerFor(k))}</span>${k==='name'?'<small>Always shown</small>':''}</label>`).join('')}</div></section>`;
+ }).join('');
+ root.innerHTML=`<div class="column-dialog" role="dialog" aria-modal="true" aria-labelledby="columnManagerTitle" aria-describedby="columnManagerHelp" tabindex="-1"><div class="column-dialog-header"><div><h2 id="columnManagerTitle">Show / hide columns</h2><p id="columnManagerHelp">Choose which details appear in the table. Item names stay visible.</p></div><button type="button" class="column-dialog-x" data-close-column-manager aria-label="Close">×</button></div><div class="column-dialog-top"><input type="search" class="db-input" id="columnManagerSearch" placeholder="Search columns..." aria-label="Search columns"><span class="muted-hint">${allowed.length} available</span></div><div class="column-dialog-scroll">${groups}</div><div class="column-dialog-footer"><div class="column-dialog-bulk"><button class="db-btn secondary small" type="button" data-column-all>Select all</button><button class="db-btn secondary small" type="button" data-column-none>Hide optional</button><button class="db-btn secondary small" type="button" data-column-default>Restore defaults</button></div><div class="column-dialog-actions"><button class="db-btn secondary" type="button" data-close-column-manager>Cancel</button><button class="db-btn" type="button" data-save-column-manager>Apply columns</button></div></div></div>`;
+ root.classList.add('open');root.setAttribute('aria-hidden','false');document.body.classList.add('column-dialog-open');
+ window.HWLang?.apply();$('#columnManagerSearch')?.focus();
+}
+function closeColumnManager(){
+ const root=$('#columnManager');if(!root||!root.classList.contains('open'))return;
+ root.classList.remove('open');root.setAttribute('aria-hidden','true');root.innerHTML='';document.body.classList.remove('column-dialog-open');
+ columnDialogFocus?.focus?.();columnDialogFocus=null;columnDialogSection='';
+}
+function columnChoices(){return $$('[data-column-choice]',$('#columnManager'));}
+function columnChangeAll(mode){
+ const section=columnDialogSection;if(!section)return;
+ const defaults=section==='inventory'?DEFAULT_INV_COLS:DEFAULT_STMT_COLS;
+ columnChoices().forEach(el=>{if(!el.disabled)el.checked=mode==='all'||mode==='default'&&defaults.includes(el.dataset.columnChoice)});
+}
+function saveColumnManager(){
+ const section=columnDialogSection;if(!section)return;
+ const selected=columnChoices().filter(el=>el.checked).map(el=>el.dataset.columnChoice);
+ columnShown[section]=allowedColumns(section).filter(k=>selected.includes(k)||k==='name');
  try{localStorage.setItem('hw_columns_'+section,JSON.stringify(columnShown[section]));}catch(_e){}
+ closeColumnManager();
  if(section==='inventory')filterInventory();else filterStatement();
 }
-const columnPicker=(section)=>`<details class="column-picker"><summary>Show / hide columns</summary><div class="column-picker-options">${COLS.filter(([key])=>section==='statements'?key!=='actions':key!=='matched'&&key!=='percent').map(([key,label])=>`<label><input type="checkbox" data-column-section="${section}" data-column-key="${key}" ${columnShown[section].includes(key)?'checked':''}> ${E(label)}</label>`).join('')}</div></details>`;
+function searchColumnOptions(q){
+ const needle=normalizeItemSearch(q); const panel=$('#columnManager');if(!panel)return;
+ $$('.column-group',panel).forEach(group=>{
+  let count=0;
+  $$('.column-option',group).forEach(label=>{
+   const name=normalizeItemSearch(label.innerText+' '+(label.dataset.columnLabel||''));
+   label.hidden=!!needle&&!name.includes(needle);if(!label.hidden)count++;
+  });
+  group.hidden=count===0;
+ });
+}
 const lotForItem=it=>cache.batches.filter(b=>Number(b.item_id)===Number(it.id));
 const lotStats=(it)=>{
  const lots=lotForItem(it),today=todayBaghdad();
@@ -68,7 +115,7 @@ function itemColumn(it,stat,key,context){
   case 'usable':return `<strong>${N(stat.usable)}</strong> ${E(it.unit)}`;
   case 'expired':return stat.expired?badge(`${N(stat.expired)} ${it.unit}`,'danger'):`${N(0)}`;
   case 'unknown':return stat.unknown?badge(`${N(stat.unknown)} ${it.unit}`,'warning'):'0';
-  case 'lots':return `${N(stat.lots.length)} <span class="tiny">lots</span>`;
+  case 'lots':return `<div class="lots-cell"><strong>${N(stat.lots.length)}</strong><span class="tiny">lots</span><button type="button" class="lot-open-btn" data-expand-item="${it.id}" aria-label="View all ${N(stat.lots.length)} stored lots">${expandedItems.has(it.id)?'Hide lots ▴':'View lots ▾'}</button></div>`;
   case 'next':return E(stat.next||'—');
   case 'price':return priceLabel(it.price_fils);
   case 'annual':return it.annual_need==null?'—':`${N(it.annual_need)} ${E(it.unit)}`;
@@ -94,16 +141,17 @@ function fullItemPanel(it,stat){
   ['Total stock',`${N(stat.physical)} ${it.unit}`],['Usable / unexpired',`${N(stat.usable)} ${it.unit}`],
   ['Expired stock',`${N(stat.expired)} ${it.unit}`],['No expiry recorded',`${N(stat.unknown)} ${it.unit}`]];
  const lots=[...stat.lots].sort((a,b)=>(a.expiry_date||'9999-12-31').localeCompare(b.expiry_date||'9999-12-31')||a.id-b.id);
- const lotRows=lots.map(b=>`<tr><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'—')}</td><td>${N(b.on_hand)} ${E(it.unit)}</td><td>${priceLabel(b.unit_price_fils)}</td><td>${badge(lotStatus(b),lotStatus(b)==='Expired'?'danger':lotStatus(b)==='Expiry unknown'?'warning':'blue')}</td></tr>`);
- return `<div class="expanded-item-panel"><div class="expanded-header"><h3>Full item information</h3><span class="muted-hint">Product ${E(it.sku)} · ${N(lots.length)} stored lot(s)</span></div>
+ const lotRows=lots.map((b,i)=>`<tr><td><span class="lot-row-index">${N(i+1)}</span></td><td><strong>${E(b.batch_no)}</strong><div class="tiny">Lot ID ${N(b.id)}</div></td><td>${E(b.expiry_date||'—')}</td><td><strong>${N(b.on_hand)}</strong> ${E(it.unit)}</td><td>${priceLabel(b.unit_price_fils)}</td><td>${badge(lotStatus(b),lotStatus(b)==='Expired'?'danger':lotStatus(b)==='Expiry unknown'?'warning':'blue')}</td></tr>`);
+ return `<div class="expanded-item-panel"><div class="expanded-header"><h3>All stored lots — ${E(it.trade_name||it.name)}</h3><span class="lot-summary-count">${N(lots.length)} stored lot(s)</span></div>
+ <p class="lot-table-intro">Every lot is listed separately with its own expiry date, remaining quantity and stored unit price—even when batch numbers repeat.</p>
+ ${lots.length?table(['#','Batch number','Expiry date','Remaining quantity','Stored lot price','Status'],lotRows):msg('No lots registered','This product has not been received yet.')}
+ <h3>Full item information</h3>
  <div class="full-item-fields">${fieldValues.map(([label,v])=>`<div class="full-field"><span>${E(label)}</span><strong>${E(v??'—')}</strong></div>`).join('')}</div>
- <h3>All batches, expiry dates and received prices</h3>
- ${lots.length?table(['Batch number','Expiry date','Remaining quantity','Stored lot price','Status'],lotRows):msg('No lots registered','This product has not been received yet.')}
  <div class="item-ledger-heading"><h3>Complete recorded movement history</h3><span class="muted-hint">Fetched from the database in pages, including older movements.</span></div>
  <div data-item-history="${it.id}"><button type="button" class="db-btn secondary small" data-load-item-history="${it.id}" data-history-offset="0">Load movement history</button></div></div>`;
 }
 function detailsTable(items,section,contexts={}){
- const chosen=columnShown[section].filter(k=>section==='statements'?k!=='actions':(k!=='percent'&&k!=='matched'));
+ const chosen=allowedColumns(section).filter(k=>k==='name'||columnShown[section].includes(k));
  const columns=[''].concat(chosen.map(headerFor));
  const rows=[];
  for(const it of items){
@@ -188,7 +236,8 @@ const filterBookOptions = (branch='', selected='') => {
  return html;
 };
 
-const typeLabel = {IN:'Received',OUT:'Distributed',RETURN:'Returned',ADJUST_PLUS:'Added adjustment',ADJUST_MINUS:'Removed adjustment'};
+const typeLabel = {IN:'Warehouse intake',OUT:'Warehouse dispatch',RETURN:'Internal return',ADJUST_PLUS:'Stock increase',ADJUST_MINUS:'Stock decrease'};
+const movementBadgeType={IN:'intake',OUT:'dispatch',RETURN:'return-type',ADJUST_PLUS:'adjustment',ADJUST_MINUS:'adjustment'};
 async function api(path,{method='GET',data,headers={},body}={}){
   let h={...headers}; if(method!=='GET')h['X-CSRF-Token']=csrf;
   if(data!==undefined){h['Content-Type']='application/json';body=JSON.stringify(data)}
@@ -298,7 +347,7 @@ function movementRows(movements){return movements.map(m=>{
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,m.kind==='OUT'?'blue':'neutral')}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
+ return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(typeLabel[m.kind]||m.kind,movementBadgeType[m.kind]||'neutral')}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map(l=>`<div><strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
 })}
 
 function batchRows(rows){return rows.map(b=>`<tr><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
@@ -331,7 +380,7 @@ function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#
 
 // Old links to #batches redirect to the combined Inventory screen.
 function batches(){return inventory()}
-function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Incoming</option><option value="OUT">Distributions</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
+function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Warehouse intake</option><option value="OUT">Warehouse dispatch</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
 // In shipment menus, an authorized item editor can create a missing catalog item without leaving the draft.
 const inlineItemButton = mode => can('item_write') && (user.role==='admin'||user.branch)
  ? `<button type="button" class="db-btn secondary small inline-item-button" data-inline-item="${mode}">+ Register item not in list</button>` : '';
@@ -475,7 +524,7 @@ ${field('Notes (optional)',`<textarea name="notes" class="db-textarea" placehold
 </div><h3 class="shipment-lines-title">Received product batches</h3>
 <div id="receiptLines">${receiveLine()}</div>
 <div class="db-actions"><button type="button" class="db-btn secondary" data-add="receive">+ Add another item</button><button type="submit" class="db-btn">${I('incoming')} Save receipt and update stock</button></div>
-</form><p class="db-help">Internal department returns add the selected batch quantity back to the warehouse; other incoming routes register incoming batches.</p>`,'incoming')}`}
+</form>`,'incoming')}`}
 function syncIncomingRoute(form){
  if(!form)return;
  const route=form.querySelector('input[name="route"]:checked')?.value||'pharmacy_receipt';
@@ -620,7 +669,7 @@ const pages={overview,inventory,warehouseStatements:warehouseStatements,position
 function showPage(next){
  if(next==='batches')next='inventory';
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup')))next='overview';
- view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
+ closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
  $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
  if(next==='settings'&&can('item_write'))loadAudit();
  window.scrollTo({top:0,behavior:'instant'});
@@ -802,7 +851,14 @@ function completeMovementPapers(m){
 }
 document.addEventListener('click',async e=>{
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
- const expand=e.target.closest('[data-expand-item]');if(expand){const id=Number(expand.dataset.expandItem),detail=document.querySelector(`[data-detail-row="${id}"]`);if(detail){detail.hidden=!detail.hidden;if(!detail.hidden&&!detail.querySelector('.expanded-item-panel')){const it=itemById(id);if(it)detail.querySelector('td').innerHTML=fullItemPanel(it,lotStats(it));}expand.textContent=detail.hidden?'▾':'▴';expand.setAttribute('aria-expanded',String(!detail.hidden));if(detail.hidden)expandedItems.delete(id);else expandedItems.add(id);}return;}
+ const expand=e.target.closest('[data-expand-item]');if(expand){const id=Number(expand.dataset.expandItem),detail=document.querySelector(`[data-detail-row="${id}"]`);if(detail){detail.hidden=!detail.hidden;if(!detail.hidden&&!detail.querySelector('.expanded-item-panel')){const it=itemById(id);if(it)detail.querySelector('td').innerHTML=fullItemPanel(it,lotStats(it));}$$(`[data-expand-item="${id}"]`).forEach(btn=>{btn.setAttribute('aria-expanded',String(!detail.hidden));if(btn.classList.contains('expand-row-btn'))btn.textContent=detail.hidden?'▾':'▴';else btn.textContent=detail.hidden?'View lots ▾':'Hide lots ▴';});if(detail.hidden)expandedItems.delete(id);else expandedItems.add(id);}return;}
+ const colOpen=e.target.closest('[data-open-column-manager]');if(colOpen){openColumnManager(colOpen.dataset.openColumnManager);return;}
+ if(e.target.closest('[data-close-column-manager]')){closeColumnManager();return;}
+ if(e.target.closest('[data-column-all]')){columnChangeAll('all');return;}
+ if(e.target.closest('[data-column-none]')){columnChangeAll('none');return;}
+ if(e.target.closest('[data-column-default]')){columnChangeAll('default');return;}
+ if(e.target.closest('[data-save-column-manager]')){saveColumnManager();return;}
+ if(e.target.id==='columnManager'){closeColumnManager();return;}
  const history=e.target.closest('[data-load-item-history]');if(history){await loadItemHistory(Number(history.dataset.loadItemHistory),Number(history.dataset.historyOffset)||0);return;}
  const statement=e.target.closest('[data-statement]');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
  if(e.target.closest('[data-reset-statement-expiry]')){statementExpiryBefore='';try{await reloadPositions()}catch(err){toast(err.message,'error')}return;}
@@ -853,7 +909,7 @@ async function applyStatementPercent(){
 }
 document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInventory();
  if(e.target.id==='statementSearch')filterStatement();
- const col=e.target.closest('[data-column-section]');if(col)setColumnVisible(col.dataset.columnSection,col.dataset.columnKey,col.checked);
+ if(e.target.id==='columnManagerSearch')searchColumnOptions(e.target.value);
  if(e.target.id==='movementFilter')filterMovements();
  if(e.target.id==='departmentFilter')filterDepartmentTable();
  if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
@@ -930,4 +986,11 @@ window.addEventListener('warehouse:languagechange',()=>{
  if($('#statementBranch'))$('#statementBranch').value=branch;
  if($('#statementBook'))$('#statementBook').value=book;
  filterStatement();window.HWLang?.apply();
+});
+
+// V4.14 column dialog keyboard support, including focus containment and Escape.
+document.addEventListener('keydown',e=>{
+ const dlg=$('#columnManager');if(!dlg?.classList.contains('open'))return;
+ if(e.key==='Escape'){e.preventDefault();closeColumnManager();return;}
+ if(e.key==='Tab'){const focusables=$$('button:not([disabled]),input:not([disabled])',dlg).filter(x=>!x.closest('[hidden]'));if(!focusables.length)return;const first=focusables[0],last=focusables.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}
 });
