@@ -19,6 +19,15 @@
     const s=normalize(original);
     if(!s||language==='en')return original;
     if(Object.prototype.hasOwnProperty.call(dict,s))return dict[s];
+    let unitMatch=s.match(/^([\d,.]+) (tablet|capsule|bottle|ampoule|vial|tube|suppository|drops|piece|bag|pack|roll|packet|dozen)$/); if(unitMatch)return unitMatch[1]+' '+(dict[unitMatch[2]]||unitMatch[2]);
+    let dynamic=s.match(/^([\d,]+) items$/); if(dynamic)return dynamic[1]+' مواد';
+    dynamic=s.match(/^([\d,]+) item lines$/); if(dynamic)return dynamic[1]+' سطر مواد';
+    dynamic=s.match(/^Opening lot ([\d,]+)$/); if(dynamic)return 'الوجبة '+dynamic[1];
+    dynamic=s.match(/^([\d,]+) IQD · ([\d,]+) fils$/); if(dynamic)return dynamic[1]+' دينار · '+dynamic[2]+' فلس';
+    dynamic=s.match(/^★ Expiry date not recorded · Recommended$/); if(dynamic)return '★ تاريخ الصلاحية غير مسجل · الموصى بها';
+    dynamic=s.match(/^★ (.+) · Recommended$/); if(dynamic)return '★ '+dynamic[1]+' · الموصى بها';
+    dynamic=s.match(/^Dispatch\/receipt: (.+)$/); if(dynamic)return 'التجهيز / الاستلام: '+dynamic[1];
+    dynamic=s.match(/^Google Drive backups \(([\d,]+)\)$/); if(dynamic)return 'نسخ Google Drive الاحتياطية ('+dynamic[1]+')';
     // Compose messages containing database values without translating user-entered data.
     let m=s.match(/^Welcome back, (.+)$/);
     if(m)return 'مرحباً بعودتك، '+m[1];
@@ -91,7 +100,7 @@
   }
   function applyAttrs(el){
     if(el.matches('[translate="no"],[data-i18n-skip],.no-translate'))return;
-    const allowed=['placeholder','aria-label','title'];
+    const allowed=['placeholder','aria-label','title',...(el.tagName==='OPTGROUP'?['label']:[])];
     let entries=attrOriginals.get(el);
     if(!entries){entries={};attrOriginals.set(el,entries)}
     for(const attr of allowed){
@@ -119,7 +128,8 @@
     document.querySelectorAll('[data-lang-switcher]').forEach(el=>{const label=language==='ar'?'لغة الواجهة':'Interface language';if(el.getAttribute('aria-label')!==label)el.setAttribute('aria-label',label)});
     const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
     while(walker.nextNode())applyNode(walker.currentNode);
-    document.querySelectorAll('[placeholder],[aria-label],[title]').forEach(applyAttrs);
+    document.querySelectorAll('[placeholder],[aria-label],[title],optgroup[label]').forEach(applyAttrs);
+    document.querySelectorAll('[data-localized-value]').forEach(el=>{el.value=translate(el.dataset.localizedValue)});
     paintSwitches();
     if(observer)observer.observe(document.body,{subtree:true,childList:true});
     document.documentElement.classList.remove('i18n-pending');

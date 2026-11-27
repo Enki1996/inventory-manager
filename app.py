@@ -52,7 +52,9 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 9
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.21.0'
+APP_RELEASE = '4.22.0'
+# The installation owner is selected by server configuration, never by staff role editing.
+OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -65,7 +67,7 @@ WRITE_PERMS = {
     'operator': {'movement_write'},
     'viewer': set(),
 }
-app = FastAPI(title='Hospital Warehouse IMS - Shared Test Build', docs_url=None, redoc_url=None)
+app = FastAPI(title='Hospital Warehouse IMS', docs_url=None, redoc_url=None)
 app.mount('/static', StaticFiles(directory=str(STATIC)), name='static')
 
 @app.middleware('http')
@@ -599,7 +601,7 @@ def init_db():
             c.execute('INSERT INTO users(username,password_hash,full_name,role,is_active,must_change_password,created_at) VALUES(?,?,?,?,?,?,?)',
                       ('enki', pw_hash(bootstrap_admin_password()), 'ENKI Administrator', 'admin', 1, 0 if PUBLIC_DEPLOY else 1, now()))
             c.execute('INSERT INTO audit_log(user_id,action,detail,created_at) VALUES (1,?,?,?)',
-                      ('INITIAL_SETUP', 'Testing administrator created', now()))
+                      ('INITIAL_SETUP', 'Installation administrator created', now()))
 
 init_db()
 
@@ -660,6 +662,25 @@ def get_user(request: Request, *, require_csrf=False):
 def permit(user, permission):
     if permission not in WRITE_PERMS[user['role']]:
         err(403, f'Your role ({user["role"]}) cannot perform this action')
+
+
+def is_ultra_admin(user):
+    return user['role'] == 'admin' and user['username'] == OWNER_USERNAME
+
+
+def permit_cloud(user):
+    if not is_ultra_admin(user):
+        err(403, 'Only the ultra administrator can manage Google Drive backups')
+
+
+def local_backup_signature(manifest):
+    # Domain-separated HMAC, using existing private key; no new Railway secret.
+    try:
+        key = gdrive.encryption_key()
+    except gdrive.CloudBackupError:
+        return None
+    fields = {k: manifest[k] for k in ('application','schema_version','created_utc','database_file','sha256')}
+    return hmac.new(key, b'IMS-local-backup-v1\0' + json.dumps(fields,sort_keys=True,separators=(',',':')).encode(),hashlib.sha256).hexdigest()
 
 
 def allow_password_change_only(user, endpoint):
@@ -749,7 +770,7 @@ async def login(request: Request):
 def me(request: Request):
     u = get_user(request)
     return {'id': u['id'], 'username': u['username'], 'full_name': u['full_name'], 'role': u['role'],
-            'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'permissions': sorted(WRITE_PERMS[u['role']])}
+            'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'is_ultra_admin': is_ultra_admin(u), 'permissions': sorted(WRITE_PERMS[u['role']])}
 
 
 
@@ -1523,7 +1544,7 @@ def list_users(request: Request):
     u = get_user(request)
     permit(u,'users')
     with db(readonly=True) as c:
-        return [dict(x) for x in c.execute('''SELECT id,username,full_name,role,branch,is_active,must_change_password,created_at
+        return [dict(x) | {'is_ultra_admin': is_ultra_admin(x)} for x in c.execute('''SELECT id,username,full_name,role,branch,is_active,must_change_password,created_at
                                                FROM users ORDER BY is_active DESC,id''')]
 
 
@@ -1548,6 +1569,8 @@ async def create_user(request: Request):
     username = validated_text(d,'username',max_len=50).lower()
     if not re.fullmatch(r'[a-z0-9_.-]{3,50}',username):
         err(422,'Username: 3-50 lowercase letters, numbers, dot, dash or underscore')
+    if username == OWNER_USERNAME:
+        err(403, 'The ultra administrator username is reserved')
     name = validated_text(d,'full_name',max_len=100)
     role = str(d.get('role',''))
     if role not in ROLES:
@@ -1575,6 +1598,8 @@ async def edit_user(user_id: int, request: Request):
         target = c.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
         if not target:
             err(404,'User not found')
+        if target['username'] == OWNER_USERNAME:
+            err(403, 'The ultra administrator account cannot be modified here')
         if user_id == u['id']:
             err(409,'You cannot change your own role or disable your own account')
         role = str(d.get('role', target['role']))
@@ -1602,8 +1627,11 @@ async def reset_user_password(user_id: int, request: Request):
     if not 8<=len(password)<=128:
         err(422,'Temporary password must contain 8 to 128 characters')
     with db() as c:
-        if not c.execute('SELECT 1 FROM users WHERE id=?',(user_id,)).fetchone():
+        target = c.execute('SELECT username FROM users WHERE id=?',(user_id,)).fetchone()
+        if not target:
             err(404,'User not found')
+        if target['username'] == OWNER_USERNAME:
+            err(403, 'The ultra administrator password cannot be reset here')
         c.execute('UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?',(pw_hash(password),user_id))
         c.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
         audit(c,u['id'],'PASSWORD_RESET',{'user_id':user_id})
@@ -1645,6 +1673,9 @@ def export_database(request: Request):
         manifest = {'application':'Hospital Warehouse IMS','schema_version':SCHEMA_VERSION,
                     'created_utc':now(),'database_file':'warehouse.sqlite3',
                     'sha256':hashlib.sha256(payload).hexdigest()}
+        signature = local_backup_signature(manifest)
+        if signature:
+            manifest['local_signature'] = signature
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer,'w',compression=zipfile.ZIP_DEFLATED) as z:
             z.writestr('manifest.json',json.dumps(manifest,indent=2))
@@ -1662,8 +1693,12 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
     if request.headers.get('x-restore-confirmation') != 'RESTORE':
         err(422,'Type RESTORE to confirm replacement of the database')
     content = await backup.read(55*1024*1024+1)
+    return restore_backup_bytes(content, u)
+
+
+def restore_backup_bytes(content, u, *, cloud_file_id=None):
     if len(content)>55*1024*1024:
-        err(413,'Backup is larger than the 55 MB testing limit')
+        err(413,'Backup is larger than the 55 MB limit')
     with tempfile.TemporaryDirectory() as tmp:
         incoming = Path(tmp)/'incoming.sqlite3'
         try:
@@ -1680,6 +1715,10 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 data = z.read('warehouse.sqlite3')
                 if hashlib.sha256(data).hexdigest()!=manifest.get('sha256'):
                     err(422,'Backup integrity check failed')
+                if not is_ultra_admin(u):
+                    expected = local_backup_signature(manifest)
+                    if not expected or not hmac.compare_digest(str(manifest.get('local_signature','')), expected):
+                        err(403, 'Only the ultra administrator can restore an unsigned or older backup')
                 incoming.write_bytes(data)
         except (zipfile.BadZipFile, ValueError, KeyError, OSError):
             err(422,'Cannot read this backup file')
@@ -1755,7 +1794,17 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
         finally:
             verify.close()
         with DB_LOCK:
-            # Pre-restore server-side copy. No network or multiple-worker support in this local prototype.
+            # Preserve the configured owner identity and credentials on staff restores.
+            with db(readonly=True) as current:
+                owner = current.execute("SELECT * FROM users WHERE username=? AND role='admin' AND is_active=1", (OWNER_USERNAME,)).fetchone()
+            if not owner:
+                err(409, 'The configured ultra administrator account is unavailable')
+            with contextlib.closing(sqlite3.connect(incoming)) as candidate, candidate:
+                restored_owner = candidate.execute('SELECT id,role,is_active FROM users WHERE username=?', (OWNER_USERNAME,)).fetchone()
+                if not restored_owner or restored_owner[0] != owner['id'] or restored_owner[1] != 'admin' or not restored_owner[2]:
+                    err(422, 'Backup does not contain the matching active ultra administrator')
+                candidate.execute('UPDATE users SET password_hash=?,must_change_password=? WHERE id=?',(owner['password_hash'],owner['must_change_password'],owner['id']))
+            # Consistent pre-restore safety copy on the existing volume.
             safety = BACKUPS / f'before_restore_{dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")}.sqlite3'
             produce_sqlite_snapshot(safety)
             src = sqlite3.connect(incoming)
@@ -1767,7 +1816,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
                 check = dst.execute('PRAGMA integrity_check').fetchone()[0]
                 if check!='ok':
                     raise RuntimeError('Restore integrity failed')
-                audit(dst,None,'BACKUP_RESTORED',json.dumps({'restored_by':u['username'],'safety_copy':safety.name}))
+                audit(dst,None,'BACKUP_RESTORED',{'restored_by':u['username'],'safety_copy':safety.name,'source':'google_drive' if cloud_file_id else 'local_zip','cloud_file_id':cloud_file_id})
                 dst.commit()
             except Exception:
                 # Recover from the safety copy if replacing fails.
@@ -1785,7 +1834,7 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
 
 
 
-# V4.21 — off-site Google Drive backup, limited to administrative access.
+# V4.22 — off-site Google Drive backup, restricted to the configured owner.
 # Automatic runs are triggered by a second Railway Cron service; no in-browser
 # timer and no insecure account password or credentials inside the repository.
 
@@ -1798,7 +1847,7 @@ def gdrive_error(exc):
 @app.get('/api/gdrive/status')
 def gdrive_status(request: Request):
     u=get_user(request)
-    permit(u,'backup')
+    permit_cloud(u)
     try:
         return gdrive.status(DATA)
     except gdrive.CloudBackupError as exc:
@@ -1808,7 +1857,7 @@ def gdrive_status(request: Request):
 @app.post('/api/gdrive/connect')
 def gdrive_connect(request: Request):
     u=get_user(request, require_csrf=True)
-    permit(u,'backup')
+    permit_cloud(u)
     try:
         return {'url':gdrive.oauth_url(DATA, u['id'])}
     except gdrive.CloudBackupError as exc:
@@ -1819,7 +1868,7 @@ def gdrive_connect(request: Request):
 def gdrive_callback(request: Request, code: str='', state: str='', error: str=''):
     try:
         u=get_user(request)
-        permit(u,'backup')
+        permit_cloud(u)
         if error or not code or not state:
             raise gdrive.CloudBackupError('Google OAuth was cancelled or incomplete')
         gdrive.exchange_code(DATA, state, code, u['id'])
@@ -1833,7 +1882,7 @@ def gdrive_callback(request: Request, code: str='', state: str='', error: str=''
 @app.post('/api/gdrive/disconnect')
 async def gdrive_disconnect(request: Request):
     u=get_user(request,require_csrf=True)
-    permit(u,'backup')
+    permit_cloud(u)
     data=await request.json()
     if data.get('confirmation')!='DISCONNECT':
         err(422,'Type DISCONNECT to revoke the connected account')
@@ -1863,7 +1912,7 @@ def perform_cloud_backup(kind, user_id=None):
 @app.post('/api/gdrive/backup-now')
 def gdrive_backup_now(request: Request):
     u=get_user(request,require_csrf=True)
-    permit(u,'backup')
+    permit_cloud(u)
     return perform_cloud_backup('manual',u['id'])
 
 
@@ -1879,7 +1928,7 @@ def gdrive_scheduled_run(request: Request):
 @app.get('/api/gdrive/files')
 def gdrive_files(request: Request):
     u=get_user(request)
-    permit(u,'backup')
+    permit_cloud(u)
     try:
         return gdrive.list_remote_backups(DATA)
     except gdrive.CloudBackupError as exc:
@@ -1889,7 +1938,7 @@ def gdrive_files(request: Request):
 @app.get('/api/gdrive/download/{file_id}')
 def gdrive_backup_download(file_id: str, request: Request):
     u=get_user(request)
-    permit(u,'backup')
+    permit_cloud(u)
     try:
         content,name=gdrive.download_file(DATA,file_id)
     except gdrive.CloudBackupError as exc:
@@ -1898,6 +1947,32 @@ def gdrive_backup_download(file_id: str, request: Request):
     return StreamingResponse(io.BytesIO(content),media_type='application/zip',headers={
         'Content-Disposition':f'attachment; filename="{safe_name}"',
         'Cache-Control':'no-store'})
+
+
+@app.post('/api/gdrive/restore/{file_id}')
+async def gdrive_restore(file_id: str, request: Request):
+    u = get_user(request, require_csrf=True)
+    permit_cloud(u)
+    payload = await request.json()
+    if payload.get('confirmation') != 'RESTORE':
+        err(422, 'Type RESTORE to confirm replacement of the database')
+    login_throttle(u['username'])
+    with db(readonly=True) as c:
+        record = c.execute('SELECT password_hash FROM users WHERE id=?',(u['id'],)).fetchone()
+    if not record or not pw_check(str(payload.get('password','')),record['password_hash']):
+        login_failed(u['username'])
+        err(403, 'Incorrect administrator password')
+    login_success(u['username'])
+    # Download and authenticate the encrypted file on the server, never in the browser.
+    from starlette.concurrency import run_in_threadpool
+    try:
+        content, _ = await run_in_threadpool(gdrive.download_file, DATA, file_id)
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+    # Recheck the session after the network request, before replacing data.
+    u = get_user(request, require_csrf=True)
+    permit_cloud(u)
+    return restore_backup_bytes(content, u, cloud_file_id=file_id)
 
 
 @app.get('/api/health')

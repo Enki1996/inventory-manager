@@ -330,3 +330,12 @@ body.column-dialog-open{overflow:hidden}
 .gdrive-file{padding:12px;display:flex;align-items:center;gap:15px;justify-content:space-between;border:1px solid #dcebf1;background:#fbfeff;border-radius:12px;min-width:0}
 .gdrive-file span{font-weight:700;word-break:break-all;min-width:0}.gdrive-file small{display:block;color:#748999;font-weight:400;margin-top:4px}
 @media(max-width:700px){.gdrive-backup-actions button{flex:1 1 46%}.gdrive-file{flex-direction:column;align-items:stretch}.gdrive-file a{text-align:center}}
+
+/* V4.22: readable stacked labels, including movement badge + description. */
+.db-table .tiny{line-height:1.65;margin-block-start:5px;font-size:10px;}
+.db-table td>.pill+.tiny{display:block;margin-block-start:7px;}
+.db-table td>.pill{line-height:1.35;}
+.movement-line-summary{display:flex;flex-direction:column;gap:4px;}
+.movement-line-summary .tiny{margin-block-start:0;}
+.gdrive-file{flex-wrap:wrap;}
+.gdrive-file .db-btn{white-space:normal;}

@@ -73,3 +73,7 @@ Tests create temporary databases; never run tests with production data. This rem
 - Existing SQLite database schema V9 and current Railway volume remain unchanged.
 - **First read `GOOGLE_DRIVE_AUTOBACKUP_SETUP.md`**. Cloud backups do **not** begin until an administrator authorizes a dedicated Google account and configures the Cron service.
 - Automated pruning of old Drive files is **not active** pending the first verified restore and dry-run retention tests.
+
+## V4.22 — Owner-controlled cloud restoration and interface refinement
+
+Read `V4_22_CHANGES.md` before updating. The existing V4.21 cron worker and all Google/Railway credentials remain unchanged. SQLite schema stays at V9.

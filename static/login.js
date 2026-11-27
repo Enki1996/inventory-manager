@@ -1,6 +1,6 @@
 const form = document.getElementById('loginForm');
 const notice = document.querySelector('.demo-note');
-notice.innerHTML = '<b>Connected test database.</b> Sign in using an administrator-created account. This early build is intended for testing, not live medical operations.';
+notice.innerHTML = '<b>Secure staff access.</b> Sign in using an administrator-created account.';
 notice.setAttribute('role','status');
 queueMicrotask(()=>window.HWLang?.apply());
 document.getElementById('eyeToggle').addEventListener('click',()=>{
