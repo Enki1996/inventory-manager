@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory() as work:
     os.environ['WAREHOUSE_DATA_DIR']=work
     os.environ.pop('WAREHOUSE_PUBLIC_DEPLOY',None)
     from app import app, APP_RELEASE, SCHEMA_VERSION, db
-    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.20.0', 9)
+    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.21.0', 9)
     with TestClient(app) as c:
         def good(r):
             assert r.status_code == 200, (r.status_code,r.text[:600]); return r.json()

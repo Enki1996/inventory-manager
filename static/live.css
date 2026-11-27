@@ -314,3 +314,19 @@ body.column-dialog-open{overflow:hidden}
 .movement-lines-table{min-width:700px}
 .movement-lines-table th,.movement-lines-table td{white-space:normal!important;min-width:65px}
 @media(max-width:700px){.movement-lines-cell{min-width:135px;flex-wrap:wrap}.movement-details-panel{padding:10px}.movement-expand-btn{padding:7px 10px}}
+
+/* V4.21 Google Drive backup panel */
+.gdrive-backup {background:#f2fafb;border:1px solid #cde9e8;border-radius:16px;padding:18px;margin:10px 0 14px;color:#17465a}
+.gdrive-status-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.gdrive-status-head strong{font-size:1.08rem}.gdrive-state{padding:5px 12px;border-radius:99px;font-weight:700;font-size:.84rem}
+.gdrive-state.connected{background:#dcf6ec;color:#147654}.gdrive-state.disconnected{background:#e9f1f6;color:#546677}
+.gdrive-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;font-size:.87rem}
+.gdrive-summary span{display:grid;gap:4px;min-width:0;word-break:break-word}
+.gdrive-summary strong{font-size:.92rem;color:#153849}
+.gdrive-error{color:#ac3939;background:#fff2f2;padding:10px;border-radius:9px;font-weight:600}
+.gdrive-backup-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.gdrive-backup-actions button:disabled{opacity:.5;cursor:not-allowed}
+.gdrive-files{display:grid;gap:8px;margin:10px 0 22px}
+.gdrive-file{padding:12px;display:flex;align-items:center;gap:15px;justify-content:space-between;border:1px solid #dcebf1;background:#fbfeff;border-radius:12px;min-width:0}
+.gdrive-file span{font-weight:700;word-break:break-all;min-width:0}.gdrive-file small{display:block;color:#748999;font-weight:400;margin-top:4px}
+@media(max-width:700px){.gdrive-backup-actions button{flex:1 1 46%}.gdrive-file{flex-direction:column;align-items:stretch}.gdrive-file a{text-align:center}}

@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from book_catalog import BOOKS_BY_BRANCH, valid_book
 from unit_catalog import UNITS_BY_BRANCH, valid_unit
 from department_catalog import DEFAULT_DEPARTMENTS
+import google_drive_backup as gdrive
 
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -51,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 9
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.20.0'
+APP_RELEASE = '4.21.0'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
 assert set(BOOKS_BY_BRANCH) == set(BRANCHES)
 assert set(UNITS_BY_BRANCH) == set(BRANCHES)
@@ -1781,6 +1782,122 @@ async def restore_database(request: Request, backup: UploadFile=File(...)):
     response = JSONResponse({'ok':True,'message':'Restore complete. All staff sessions were closed. Sign in again.'})
     response.delete_cookie('wh_session',path='/')
     return response
+
+
+
+# V4.21 — off-site Google Drive backup, limited to administrative access.
+# Automatic runs are triggered by a second Railway Cron service; no in-browser
+# timer and no insecure account password or credentials inside the repository.
+
+def gdrive_error(exc):
+    if isinstance(exc, gdrive.CloudBackupError):
+        err(409, str(exc))
+    raise exc
+
+
+@app.get('/api/gdrive/status')
+def gdrive_status(request: Request):
+    u=get_user(request)
+    permit(u,'backup')
+    try:
+        return gdrive.status(DATA)
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+
+
+@app.post('/api/gdrive/connect')
+def gdrive_connect(request: Request):
+    u=get_user(request, require_csrf=True)
+    permit(u,'backup')
+    try:
+        return {'url':gdrive.oauth_url(DATA, u['id'])}
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+
+
+@app.get('/api/gdrive/callback')
+def gdrive_callback(request: Request, code: str='', state: str='', error: str=''):
+    try:
+        u=get_user(request)
+        permit(u,'backup')
+        if error or not code or not state:
+            raise gdrive.CloudBackupError('Google OAuth was cancelled or incomplete')
+        gdrive.exchange_code(DATA, state, code, u['id'])
+        with db() as c:
+            audit(c,u['id'],'GOOGLE_DRIVE_CONNECTED',{'scope':'drive.file'})
+        return RedirectResponse('/dashboard.html?gdrive=connected#backup',status_code=303)
+    except (HTTPException, gdrive.CloudBackupError):
+        return RedirectResponse('/dashboard.html?gdrive=error#backup',status_code=303)
+
+
+@app.post('/api/gdrive/disconnect')
+async def gdrive_disconnect(request: Request):
+    u=get_user(request,require_csrf=True)
+    permit(u,'backup')
+    data=await request.json()
+    if data.get('confirmation')!='DISCONNECT':
+        err(422,'Type DISCONNECT to revoke the connected account')
+    try:
+        gdrive.disconnect(DATA)
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+    with db() as c:
+        audit(c,u['id'],'GOOGLE_DRIVE_DISCONNECTED',{})
+    return {'ok':True}
+
+
+def perform_cloud_backup(kind, user_id=None):
+    try:
+        result=gdrive.run_backup(DATA,produce_sqlite_snapshot,SCHEMA_VERSION,kind=kind)
+    except gdrive.CloudBackupError as exc:
+        with db() as c:
+            audit(c,user_id,'GOOGLE_DRIVE_BACKUP_FAILED',{'kind':kind,'error':str(exc)[:180]})
+        gdrive_error(exc)
+    if result.get('already_done'):
+        return result
+    with db() as c:
+        audit(c,user_id,'GOOGLE_DRIVE_BACKUP_COMPLETED',{'kind':kind,'file_name':result['name'],'slot':result.get('slot')})
+    return result
+
+
+@app.post('/api/gdrive/backup-now')
+def gdrive_backup_now(request: Request):
+    u=get_user(request,require_csrf=True)
+    permit(u,'backup')
+    return perform_cloud_backup('manual',u['id'])
+
+
+@app.post('/api/gdrive/scheduled-run')
+def gdrive_scheduled_run(request: Request):
+    secret=os.getenv('WAREHOUSE_BACKUP_CRON_SECRET','')
+    presented=request.headers.get('x-warehouse-cron-secret','')
+    if len(secret)<32 or not hmac.compare_digest(presented,secret):
+        err(403,'Scheduled backup authorization failed')
+    return perform_cloud_backup('scheduled',None)
+
+
+@app.get('/api/gdrive/files')
+def gdrive_files(request: Request):
+    u=get_user(request)
+    permit(u,'backup')
+    try:
+        return gdrive.list_remote_backups(DATA)
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+
+
+@app.get('/api/gdrive/download/{file_id}')
+def gdrive_backup_download(file_id: str, request: Request):
+    u=get_user(request)
+    permit(u,'backup')
+    try:
+        content,name=gdrive.download_file(DATA,file_id)
+    except gdrive.CloudBackupError as exc:
+        gdrive_error(exc)
+    safe_name=re.sub(r'[^A-Za-z0-9_.-]','_',name)
+    return StreamingResponse(io.BytesIO(content),media_type='application/zip',headers={
+        'Content-Disposition':f'attachment; filename="{safe_name}"',
+        'Cache-Control':'no-store'})
 
 
 @app.get('/api/health')

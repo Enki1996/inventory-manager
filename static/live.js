@@ -1,4 +1,4 @@
-/* Live V4.20 bilingual warehouse application: all stock, including opening balances, is audited. */
+/* Live V4.21 bilingual warehouse application: all stock, including opening balances, is audited. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -736,8 +736,11 @@ function returns(){return `${head('Stock adjustments','Department returns are re
 ${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):msg('Read-only','Only managers and administrators with branch permissions can adjust stock.')}`}
 function users(){if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');const rows=cache.users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">عرض البيانات · Details</button></td><td>${x.id!==user.id?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:'Current account'}</td></tr>`);
 return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',table(['Username / name','Role','Assigned branch','Status','Profile details','Actions'],rows),'users')}`}
-function backup(){return `${head('Database backup and restore','Administrators can download a portable complete snapshot or upload a previously exported file. Account password hashes are included, but active login sessions are excluded.')}
-<div class="db-layout">${panel('Download full backup',`<p class="muted-hint" style="margin-bottom:16px">Includes users, departments, items, batches, requisition references, all movements and audit records. Creates a ZIP with a database snapshot and SHA-256 manifest.</p><button type="button" class="db-btn" id="downloadBackup">${I('download')} Download full database backup</button>`,'backup')}${panel('Restore previously exported backup',`<p class="muted-hint" style="margin-bottom:15px">This replaces ALL current records with the uploaded snapshot. A safety copy is automatically saved to the server first.</p><form id="restoreForm" class="db-form">${field('Upload warehouse backup ZIP',`<input name="backup" type="file" class="db-input" accept=".zip" required>`)}${field('Type RESTORE to confirm',inp('confirmation','RESTORE','text','required autocomplete="off"'))}<button class="db-btn danger" type="submit">${I('upload')} Validate and restore backup</button></form>`,'backup')}</div><div class="db-note warn">Important: restoration can remove transactions created after the selected backup. It also signs out all staff. Download and store backups securely; this testing build has manual backup only.</div>`}
+function backup(){return `${head('Database backup and restore','Administrators can export and restore the database, and manage encrypted Google Drive backups.')}
+<div class="db-layout">${panel('Download full backup',`<p class="muted-hint" style="margin-bottom:16px">Includes users, departments, items, batches, requisition references, all movements and audit records. Creates a restorable ZIP with a SQLite snapshot and SHA-256 manifest.</p><button type="button" class="db-btn" id="downloadBackup">${I('download')} Download full database backup</button>`,'backup')}${panel('Restore previously exported backup',`<p class="muted-hint" style="margin-bottom:15px">This replaces ALL current records with the uploaded snapshot. A local safety copy is saved first.</p><form id="restoreForm" class="db-form">${field('Upload warehouse backup ZIP',`<input name="backup" type="file" class="db-input" accept=".zip" required>`)}${field('Type RESTORE to confirm',inp('confirmation','RESTORE','text','required autocomplete="off"'))}<button class="db-btn danger" type="submit">${I('upload')} Validate and restore backup</button></form>`,'backup')}</div>
+${panel('Google Drive — automatic encrypted backups',`<div class="gdrive-backup" id="googleDriveStatus" aria-live="polite"><span class="muted-hint">Checking Google Drive connection…</span></div><div class="gdrive-backup-actions"><button type="button" class="db-btn" id="gdriveConnect">${I('backup')} Connect Google Drive</button><button type="button" class="db-btn secondary" id="gdriveRunNow" disabled>${I('upload')} Back up now</button><button type="button" class="db-btn secondary" id="gdriveRefresh">Refresh status</button><button type="button" class="db-btn secondary" id="gdriveBrowse">Browse Drive backups</button><button type="button" class="db-btn secondary" id="gdriveDisconnect" disabled>Disconnect</button></div><div id="gdriveBackups"></div><div class="db-note">Automatic: 10:00 AM and 2:00 PM Baghdad time, once the Railway Cron service is configured. Google Drive files are encrypted; the decryption key must be stored securely outside Railway too. Restore is manual and administrator-only.</div>`,'backup')}
+<div class="db-note warn">Before restoring, download and verify a recent backup. Never paste OAuth tokens or the encryption key into the website, chat, or GitHub. Google Drive backups are independent of the Railway volume.</div>`}
+
 function reports(){const low=cache.items.filter(x=>x.active&&x.min_stock>0&&x.stock<x.min_stock);const dist=cache.movements.filter(x=>x.kind==='OUT');const total=dist.length;
 return `${head('Warehouse reports','Basic live summaries derived from your saved records. Spreadsheet and PDF reports can be added after we finalize the workflow.')}
 <div class="db-kpis"><div class="db-kpi"><span class="name">${I('package')} Products</span><span class="num">${N(cache.items.length)}</span></div><div class="db-kpi"><span class="name">${I('warning')} Low stock</span><span class="num">${N(low.length)}</span></div><div class="db-kpi"><span class="name">${I('outgoing')} Distribution slips</span><span class="num">${N(total)}</span></div><div class="db-kpi"><span class="name">${I('history')} Total transactions</span><span class="num">${N(cache.movements.length)}</span></div></div>
@@ -809,7 +812,7 @@ function showPage(next){
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup'))||(next==='settings'&&user.role!=='admin'))next='overview';
  closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
  $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
- if(next==='settings'&&user?.role==='admin')loadAudit();if(next==='profile')loadProfile();
+ if(next==='settings'&&user?.role==='admin')loadAudit();if(next==='profile')loadProfile();if(next==='backup')loadGoogleDriveStatus();
  window.scrollTo({top:0,behavior:'instant'});
 }
 function route(next){location.hash=next;showPage(next)}
@@ -1015,6 +1018,50 @@ async function postShipment(kind,form,lines){
 function routeToMovements(){route('movements')}
 
 async function loadAudit(){try{const a=await api('/api/audit');if(view!=='settings')return;$('#auditLog').innerHTML=table(['Date / time','Action','Operator','Detail'],a.map(x=>`<tr><td>${D(x.created_at)}</td><td>${E(x.action)}</td><td>${E(x.username||'System')}</td><td><span class="tiny">${E(x.detail).slice(0,220)}</span></td></tr>`))}catch(e){if($('#auditLog'))$('#auditLog').textContent=e.message}}
+// Google Drive account, schedule, and backup history are admin-only. No keys or
+// refresh tokens are ever sent to the browser.
+async function loadGoogleDriveStatus(){
+ const el=$('#googleDriveStatus'),list=$('#gdriveBackups');if(!el||view!=='backup')return;
+ try{
+  const d=await api('/api/gdrive/status');
+  const status=d.connected?'متصل بـ Google Drive · Connected':d.configured?'غير متصل · Not connected':'Requires Railway credentials';
+  el.innerHTML=`<div class="gdrive-status-head"><strong>${E(status)}</strong><span class="gdrive-state ${d.connected?'connected':'disconnected'}">${d.connected?'● Connected':'○ Not connected'}</span></div>
+  <div class="gdrive-summary"><span>جدول النسخ: <strong>${E(d.schedule||'10:00 and 14:00 Asia/Baghdad')}</strong></span><span>آخر نسخة ناجحة: <strong>${E(d.last_success_utc?fmtDate(d.last_success_utc):'—')}</strong></span><span>آخر ملف: <strong>${E(d.last_file_name||'—')}</strong></span><span>نسخ اليوم: <strong>${E((d.completed_today||[]).join(', ')||'—')}</strong></span></div>
+  ${d.last_error?`<p class="gdrive-error">آخر خطأ: ${E(d.last_error)}</p>`:''}
+  ${d.root_folder_id?`<a href="https://drive.google.com/drive/u/0/folders/${encodeURIComponent(d.root_folder_id)}" target="_blank" rel="noopener noreferrer">Open IMS_SECURE_BACKUPS folder in Google Drive</a>`:''}`;
+  $('#gdriveConnect').disabled=!d.configured;
+  $('#gdriveRunNow').disabled=!d.connected;
+  $('#gdriveDisconnect').disabled=!d.connected;
+  list.innerHTML=`<h3>Recent Google Drive backups</h3>${(d.recent||[]).length?`<div class="gdrive-files">${d.recent.map(f=>`<div class="gdrive-file"><span>${E(f.name)}<small>${E(f.created_utc||'')}</small></span><a class="db-btn secondary small" href="/api/gdrive/download/${encodeURIComponent(f.id)}">Download restorable ZIP</a></div>`).join('')}</div>`:'<p class="muted-hint">No Google Drive backups created by this app yet.</p>'}`;
+  window.HWLang?.apply();
+ }catch(e){el.innerHTML=`<p class="gdrive-error">${E(e.message)}</p>`}
+}
+async function browseGoogleDriveBackups(){
+ const listing=$('#gdriveBackups');if(!listing)return;
+ listing.innerHTML='<p class="muted-hint">Loading Drive backups…</p>';
+ try{
+  const files=await api('/api/gdrive/files');
+  listing.innerHTML=`<h3>Google Drive backups (${N(files.length)})</h3>${files.length?`<div class="gdrive-files">${files.map(f=>`<div class="gdrive-file"><span>${E(f.name)}<small>${E(f.created_utc||'')}</small></span><a class="db-btn secondary small" href="/api/gdrive/download/${encodeURIComponent(f.id)}">Download restorable ZIP</a></div>`).join('')}</div>`:'<p class="muted-hint">No IMS backups found in this connected Google Drive account.</p>'}`;
+  window.HWLang?.apply();
+ }catch(err){listing.innerHTML=`<p class="gdrive-error">${E(err.message)}</p>`}
+}
+async function beginGDriveConnection(){
+ const r=await api('/api/gdrive/connect',{method:'POST'});
+ if(!r.url||!r.url.startsWith('https://accounts.google.com/'))throw Error('Invalid Google authorization URL');
+ location.assign(r.url);
+}
+async function runGDriveNow(){
+ if(!window.confirm('Create an encrypted Google Drive backup now?'))return;
+ const b=$('#gdriveRunNow');b.disabled=true;
+ try{const result=await api('/api/gdrive/backup-now',{method:'POST'});
+  toast(result.ok?'Encrypted backup uploaded to Google Drive':'Google Drive backup was not completed');await loadGoogleDriveStatus();
+ }finally{if(document.body.contains(b))b.disabled=false}
+}
+async function disconnectGDrive(){
+ if(!window.confirm('Disconnect Google Drive? Already uploaded encrypted backups will remain there.'))return;
+ await api('/api/gdrive/disconnect',{method:'POST',data:{confirmation:'DISCONNECT'}});
+ toast('Google Drive disconnected');await loadGoogleDriveStatus();
+}
 async function downloadBackup(){try{
  const r=await api('/api/backup/export');const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);
  a.download=r.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1]||'warehouse_backup.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('Backup downloaded. Store it in a secure location.');
@@ -1091,6 +1138,11 @@ document.addEventListener('click',async e=>{
  if(e.target.closest('[data-remove-line]')){const line=e.target.closest('.ship-line');const parent=line.parentElement;if(parent.children.length>1)line.remove();else toast('At least one line is required','error');updateFefoNotices();return}
  const add=e.target.closest('[data-add]');if(add){const type=add.dataset.add;if(type==='receive'){$('#receiptLines').insertAdjacentHTML('beforeend',$('#receiptLines').dataset.returnMode==='1'?issueLine(true):receiveLine());}else $(`#${type==='issue'?'issueLines':'adjustLines'}`).insertAdjacentHTML('beforeend',issueLine(type!=='issue'));return}
  if(e.target.closest('#downloadBackup')){downloadBackup();return}
+ if(e.target.closest('#gdriveConnect')){try{await beginGDriveConnection()}catch(err){toast(err.message,'error')}return}
+ if(e.target.closest('#gdriveRunNow')){try{await runGDriveNow()}catch(err){toast(err.message,'error')}return}
+ if(e.target.closest('#gdriveRefresh')){await loadGoogleDriveStatus();return}
+ if(e.target.closest('#gdriveBrowse')){await browseGoogleDriveBackups();return}
+ if(e.target.closest('#gdriveDisconnect')){try{await disconnectGDrive()}catch(err){toast(err.message,'error')}return}
 });
 document.addEventListener('submit',async e=>{
  const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','profileForm','restoreForm'].includes(form.id))return;
@@ -1211,6 +1263,7 @@ document.addEventListener('keydown',e=>{
  if(!can('backup'))$$('[data-view="backup"]').forEach(x=>x.style.display='none');
  if(user.role!=='admin')$$('[data-view="settings"]').forEach(x=>x.style.display='');
  await refreshData();showPage(location.hash.slice(1)||'overview');
+ const gd=new URLSearchParams(location.search).get('gdrive');if(gd){toast(gd==='connected'?'Google Drive connected successfully':'Google authorization failed. Please try again.',gd==='connected'?'ok':'error');history.replaceState(null,'',location.pathname+location.hash);}
 }catch(e){$('#dashboardView').innerHTML=msg('Database unavailable',e.message);toast(e.message,'error')}})();
 
 window.addEventListener('warehouse:languagechange',()=>{document.querySelectorAll('time.localized-time[datetime]').forEach(el=>{el.textContent=fmtDate(el.getAttribute('datetime'))});if(view==='inventory')filterInventory();if(view==='distribution')updateFefoNotices()});

@@ -66,3 +66,9 @@ This update uses the existing schema V8. It only adds application logic and the 
 6. Verify **رصيد افتتاحي**, **حركة المواد**, **Departments → Shipment history**, and **My account** with test records.
 
 Note: This is a **code update**, not a database restore. Do not restore a demo backup when upgrading your live app.
+
+## V4.21 — Google Drive automatic off-site backup
+
+See [`GOOGLE_DRIVE_AUTOBACKUP_SETUP.md`](GOOGLE_DRIVE_AUTOBACKUP_SETUP.md) for required OAuth Web client setup, the encrypted key, the new variables on this service, **10AM and 2PM Baghdad** Cron service deployment from the same private repository, manual backup test, and recovery instructions.
+
+Keep the existing Railway `/data` volume; this version does not change schema V9. No OAuth secret, Drive tokens, admin password or backup encryption key belongs in GitHub.

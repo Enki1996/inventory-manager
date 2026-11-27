@@ -65,3 +65,11 @@ python test_v414_release.py
 ```
 
 Tests create temporary databases; never run tests with production data. This remains a **testing version**, not a validated hospital production system. Use test data; do not enter sensitive medical or patient data. Secure accounts and backups. SQLite requires a single Railway worker/replica.
+
+## V4.21 — Encrypted Google Drive backups (opt-in)
+
+- Admin-only Google OAuth connection, encrypted `.hwenc` backups, manual encrypted cloud backup, and manual download/decryption back into standard restore ZIP.
+- Two scheduled backups **10:00 and 14:00 Baghdad time** using a separate Railway Cron service (deploy the cron-only ZIP from a second private GitHub repository).
+- Existing SQLite database schema V9 and current Railway volume remain unchanged.
+- **First read `GOOGLE_DRIVE_AUTOBACKUP_SETUP.md`**. Cloud backups do **not** begin until an administrator authorizes a dedicated Google account and configures the Cron service.
+- Automated pruning of old Drive files is **not active** pending the first verified restore and dry-run retention tests.
