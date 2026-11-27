@@ -1,0 +1,6 @@
+/* The official, user-supplied IMS identity on Login and authenticated Dashboard. */
+.logo-mark{overflow:hidden;background:linear-gradient(140deg,#ebfaf7,#e7f5f9);border-color:#bde7e2}
+.logo-mark img{display:block;width:94%;height:94%;object-fit:contain}
+.logo-name>b,.logo-name b{font-size:.83em;color:#0a9a95;letter-spacing:0}
+.login-nav .logo-name,.sidebar-head .logo-name{line-height:1.3}
+html[lang="ar"] .logo-name{letter-spacing:0}

@@ -52,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 9
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.22.0'
+APP_RELEASE = '4.23.0'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -697,6 +697,16 @@ def home():
 @app.get('/index.html')
 def home_alias():
     return FileResponse(STATIC / 'index.html')
+
+
+@app.get('/privacy.html')
+def privacy_policy_page():
+    return FileResponse(STATIC / 'privacy.html')
+
+
+@app.get('/terms.html')
+def terms_of_use_page():
+    return FileResponse(STATIC / 'terms.html')
 
 
 @app.get('/login.html')

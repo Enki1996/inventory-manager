@@ -72,3 +72,8 @@ Note: This is a **code update**, not a database restore. Do not restore a demo b
 See [`GOOGLE_DRIVE_AUTOBACKUP_SETUP.md`](GOOGLE_DRIVE_AUTOBACKUP_SETUP.md) for required OAuth Web client setup, the encrypted key, the new variables on this service, **10AM and 2PM Baghdad** Cron service deployment from the same private repository, manual backup test, and recovery instructions.
 
 Keep the existing Railway `/data` volume; this version does not change schema V9. No OAuth secret, Drive tokens, admin password or backup encryption key belongs in GitHub.
+
+
+## V4.23 Home/Logo/Legal Pages
+
+Update your existing GitHub repository with V4.23 and redeploy the **same** Railway web service. Keep `/data` (persistent volume) and the existing environment variables untouched. No database restoration or scheduler changes are needed. Check `/api/health` for `"release":"4.23.0"` and `"version":9`. Verify `/`, `/login.html`, `/privacy.html` and `/terms.html` and review the policy draft before official use.

@@ -6,7 +6,7 @@ root=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory() as tmp:
  os.environ['WAREHOUSE_DATA_DIR']=tmp
  from app import app,SCHEMA_VERSION,APP_RELEASE
- assert (SCHEMA_VERSION,APP_RELEASE)==(9,'4.22.0')
+ assert (SCHEMA_VERSION,APP_RELEASE)==(9,'4.23.0')
  with TestClient(app) as t:
   def ok(r):assert r.status_code==200,(r.status_code,r.text[:400]);return r.json()
   ok(t.post('/api/login',json={'username':'enki','password':'123'}))
@@ -35,5 +35,5 @@ with tempfile.TemporaryDirectory() as tmp:
  assert 'Return home</a>' not in html
  assert 'id="notificationModal"' in html
  assert 'id="passwordForm"' in js
- assert '4.22.0' in html
+ assert '4.23.0' in html
  print('PASS V4.18: profile admin access, password changes, audit authorization, UI selectors and version')

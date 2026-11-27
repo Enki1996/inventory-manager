@@ -77,3 +77,12 @@ Tests create temporary databases; never run tests with production data. This rem
 ## V4.22 — Owner-controlled cloud restoration and interface refinement
 
 Read `V4_22_CHANGES.md` before updating. The existing V4.21 cron worker and all Google/Railway credentials remain unchanged. SQLite schema stays at V9.
+
+
+## V4.23 — Official IMS branding and public pages
+
+The supplied **المذخر IMS** brand is now used on the responsive Home page, Login, dashboard sidebar and favicon. The public Home page remains **one page** with working smooth-scroll anchors for Home, Features, Workflow and Data Protection. The interactive preview uses illustrative data only.
+
+Separate bilingual pages are served at `/privacy.html` and `/terms.html`. Their text is a **draft** and should be reviewed/approved by the responsible hospital or legal department before official adoption. The Arabic text is editable in `static/locales/ar.json`; Home/Legal HTML in `static/`; shared marketing styles in `static/marketing.css`.
+
+**No database migration is required**: application release V4.23.0, database schema V9. Keep the existing persistent Railway volume and all environment variables unchanged. Export a backup before redeploying. Google Drive backups require their existing authorization and scheduler setup; this release does not enable them automatically.

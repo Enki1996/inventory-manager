@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as root:
     os.environ['WAREHOUSE_DATA_DIR'] = root
     from app import app, DB, SCHEMA_VERSION, APP_RELEASE, position_window
-    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.22.0'
+    assert SCHEMA_VERSION == 9 and APP_RELEASE == '4.23.0'
     today = dt.datetime.now(ZoneInfo('Asia/Baghdad')).date()
     _, end, last = position_window()
     after = (dt.date.fromisoformat(end) + dt.timedelta(days=40)).isoformat()
