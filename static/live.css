@@ -377,3 +377,8 @@ body.column-dialog-open{overflow:hidden}
 .pager-ellipsis{padding:0 3px;color:#7c9ea6}
 @media(max-width:800px){.list-pagination{justify-content:center}.pager-count{flex:1 0 100%;text-align:center}.pager-size-label{flex:1 1 100%;justify-content:center}.pager-buttons{justify-content:center}}
 @media(max-width:450px){.pager-number,.pager-nav{min-width:29px;height:32px;padding:4px 7px}.pager-buttons{gap:3px}}
+
+/* V4.27 — Print designer launch in Warehouse Statements */
+.statement-print-button{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;box-shadow:0 6px 16px rgba(5,137,144,.13)}
+.statement-print-button .i{width:17px;height:17px}
+@media(max-width:750px){.statement-print-button{flex:1;justify-content:center;min-width:165px}}

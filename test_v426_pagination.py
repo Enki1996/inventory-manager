@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as temp:
  os.environ['WAREHOUSE_DATA_DIR']=temp
  from app import app,db,APP_RELEASE,SCHEMA_VERSION
- assert (APP_RELEASE,SCHEMA_VERSION)==('4.26.0',10)
+ assert (APP_RELEASE,SCHEMA_VERSION)==('4.27.1',10)
  with TestClient(app) as client:
   def okay(response):
    assert response.status_code==200,(response.status_code,response.text[:600]);return response.json()

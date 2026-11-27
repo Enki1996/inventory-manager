@@ -825,7 +825,7 @@ function warehouseStatements(){
  <select class="db-select" id="statementBranch"><option value="">All branches</option>${BRANCHES.map(([id,name])=>`<option value="${E(id)}">${E(name)}</option>`).join('')}</select>
  <select class="db-select" id="statementBook">${filterBookOptions()}</select>
  <select class="db-select" id="statementSort"><option value="name" ${statementSort==='name'?'selected':''}>Sort: name</option><option value="expiry" ${statementSort==='expiry'?'selected':''}>Sort: earliest expiry</option><option value="stock_desc" ${statementSort==='stock_desc'?'selected':''}>Sort: most stock</option><option value="stock_asc" ${statementSort==='stock_asc'?'selected':''}>Sort: least stock</option></select>
- ${columnPicker('statements')}<span class="muted-hint" id="statementShown"></span></div>
+ ${columnPicker('statements')}<button type="button" class="db-btn statement-print-button" data-print-statement aria-label="Print statement"><span aria-hidden="true">🖨</span><span>Design &amp; print statement</span></button><span class="muted-hint" id="statementShown"></span></div>
  <div id="statementTable" aria-live="polite"></div></div>`;
 }
 function filterStatement(){
@@ -1256,6 +1256,17 @@ document.addEventListener('click',async e=>{
  const inspectDept=e.target.closest('[data-open-dept-shipments]');if(inspectDept){await openShipmentHistory('department',Number(inspectDept.dataset.openDeptShipments));return;}
  const moreShipments=e.target.closest('[data-more-shipments]');if(moreShipments){await loadShipmentHistory(Number(moreShipments.dataset.moreShipments));return;}
  const history=e.target.closest('[data-load-item-history]');if(history){await loadItemHistory(Number(history.dataset.loadItemHistory),Number(history.dataset.historyOffset)||0);return;}
+ if(e.target.closest('[data-print-statement]')){
+  const params=new URLSearchParams({
+   mode:statementMode,search:$('#statementSearch')?.value||'',branch:$('#statementBranch')?.value||'',
+   book:$('#statementBook')?.value||'',sort:$('#statementSort')?.value||'name',
+   scarce_pct:String(statementScarcePct),surplus_pct:String(statementSurplusPct),
+   expiry_before:cache.positions?.expiry_before||statementExpiryBefore||'',
+   lang:window.HWLang?.get()||'ar'
+  });
+  window.open('/print-report.html?'+params.toString(),'_blank','noopener');
+  return;
+ }
  const statement=e.target.closest('[data-statement]');if(statement){statementMode=statement.dataset.statement;showPage('positions');return}
  if(e.target.closest('[data-reset-statement-expiry]')){statementExpiryBefore='';try{await reloadPositions()}catch(err){toast(err.message,'error')}return;}
  if(e.target.closest('[data-apply-statement-percent]')){try{await applyStatementPercent()}catch(err){toast(err.message,'error')}return;}

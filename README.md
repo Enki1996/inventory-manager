@@ -1,3 +1,11 @@
+# Hospital Warehouse IMS V4.27.1 — Typography Refresh
+
+See [`V4_27_1_TYPOGRAPHY.md`](V4_27_1_TYPOGRAPHY.md). The new Arabic font styling applies to Home and Login as well as major headings on related pages. **Copy the two user-provided fonts manually to `static/fonts/` before deployment.** Schema V10 unchanged.
+
+# Hospital Warehouse IMS V4.27 — Print & Report Designer
+
+The **المواقف** section now has a dedicated, authenticated print designer with column selection, A4 Arabic preview, portrait/landscape, item or lot level rows, and native PDF/physical printing. **No stock database migration is required (Schema V10).** See [`V4_27_CHANGES.md`](V4_27_CHANGES.md) for the full workflow and how existing report filters are carried into print.
+
 ## V4.26 — List Pagination and Recovery Colors
 
 - Paginated inventory, item movements, departments, staff accounts, movement register, audit log, and reports. Page sizes: 20 / 50 / 100.

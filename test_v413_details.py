@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as root:
     os.environ['WAREHOUSE_DATA_DIR']=root
     from app import app, SCHEMA_VERSION, APP_RELEASE
-    assert (SCHEMA_VERSION,APP_RELEASE)==(10,'4.26.0')
+    assert (SCHEMA_VERSION,APP_RELEASE)==(10,'4.27.1')
     today=dt.datetime.now(ZoneInfo('Asia/Baghdad')).date()
     early=(today+dt.timedelta(days=45)).isoformat()
     late=(today+dt.timedelta(days=340)).isoformat()
@@ -36,5 +36,5 @@ with tempfile.TemporaryDirectory() as root:
         assert client.get('/api/items/99999/history').status_code==404
         positions=good(client.get('/api/positions'))
         assert any(x['item_id']==item for x in positions['near_expiry'])
-        assert good(client.get('/api/health'))['release']=='4.26.0'
+        assert good(client.get('/api/health'))['release']=='4.27.1'
         print('PASS V4.13: item detailed history pagination, multiple priced lots, expiry reports, read-only access, auth, schema compatibility')

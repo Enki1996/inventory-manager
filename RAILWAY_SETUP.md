@@ -1,3 +1,5 @@
+# V4.27 update: Read V4_27_CHANGES.md. Redeploy the same Railway service with the existing /data volume; schema remains V10. Printable statements use authenticated read-only APIs.
+
 ## V4.26 update
 
 Redeploy the **same** Railway application using this ZIP. Keep the existing `/data` volume and variables unchanged; export a backup first. Verify `/api/health` reports `"release":"4.26.0"` and `"version":10`. No schema migration is required.

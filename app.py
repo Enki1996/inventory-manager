@@ -52,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 10
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.26.0'
+APP_RELEASE = '4.27.1'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -742,6 +742,17 @@ def terms_of_use_page():
 @app.get('/login.html')
 def login_page():
     return FileResponse(STATIC / 'login.html')
+
+
+@app.get('/print-report.html')
+def print_report_page(request: Request):
+    # The template itself has no patient or inventory data; all report data
+    # is fetched through authenticated, read-only IMS endpoints.
+    try:
+        get_user(request)
+    except HTTPException:
+        return RedirectResponse('/login.html', status_code=302)
+    return FileResponse(STATIC / 'print-report.html', headers={'Cache-Control':'no-store'})
 
 
 @app.get('/dashboard.html')

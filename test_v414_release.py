@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as d:
     os.environ['WAREHOUSE_DATA_DIR']=d
     from app import app,SCHEMA_VERSION,APP_RELEASE
-    assert SCHEMA_VERSION==10 and APP_RELEASE=='4.26.0'
+    assert SCHEMA_VERSION==10 and APP_RELEASE=='4.27.1'
     with TestClient(app) as client:
         r=client.get('/api/health')
-        assert r.status_code==200 and r.json()['release']=='4.26.0' and r.json()['version']==10
+        assert r.status_code==200 and r.json()['release']=='4.27.1' and r.json()['version']==10
         js=client.get('/static/live.js').text
         css=client.get('/static/live.css').text
         i18n=client.get('/static/locales/ar.json').json()

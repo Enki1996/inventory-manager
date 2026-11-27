@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as d:
     os.environ['WAREHOUSE_DATA_DIR']=d
     from app import app, APP_RELEASE, SCHEMA_VERSION
-    assert (APP_RELEASE,SCHEMA_VERSION)==('4.26.0',10)
+    assert (APP_RELEASE,SCHEMA_VERSION)==('4.27.1',10)
     with TestClient(app) as c:
         def ok(r):
             assert r.status_code==200,(r.status_code,r.text[:700]);return r.json()
@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory() as d:
         assert [(l['batch_no'],l['qty']) for l in row['lines']]==[('A1',9),('B2',12)]
         assert [l['unit_price_fils'] for l in row['lines']]==[105500,150250]
         js=ok(c.get('/api/health'))
-        assert js['release']=='4.26.0' and js['version']==10
+        assert js['release']=='4.27.1' and js['version']==10
         source=c.get('/static/live.js').text
         assert 'function movementDetailsRow' in source and 'data-expand-movement' in source
         assert '★ ' in source and 'fefo-recommended-select' in source

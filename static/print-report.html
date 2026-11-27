@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f4fafc">
+<meta name="robots" content="noindex,nofollow">
+<title>تصميم وطباعة المواقف | المذخر IMS</title>
+<link rel="icon" href="/static/ims-icon.png" type="image/png">
+<link rel="stylesheet" href="/static/print-report.css?v=4.27.1">
+<style id="dynamicPageStyle">@page{size:A4 landscape;margin:0}</style>
+<link rel="stylesheet" href="/static/ims-typography.css?v=4.27.1"></head>
+<body>
+<div class="print-designer-app">
+  <header class="designer-header no-print">
+    <div class="brand-group">
+      <a href="/dashboard.html#positions" class="brand-mark" aria-label="العودة إلى النظام"><img src="/static/ims-icon.png" alt="" width="36" height="36"></a>
+      <div class="brand-text"><strong>المذخر <span>IMS</span></strong><small data-ui="subhead">نظام إدارة المخزون · مركز إعداد التقارير</small></div>
+    </div>
+    <div class="designer-header-actions">
+      <span class="version-pill">V4.27</span>
+      <div class="locale-switch" role="group" aria-label="Language"><button type="button" data-locale="ar" aria-pressed="true">العربية</button><button type="button" data-locale="en" aria-pressed="false">EN</button></div>
+      <a class="outline-link" href="/dashboard.html#positions" data-ui="back">العودة إلى المواقف <span aria-hidden="true">←</span></a>
+    </div>
+  </header>
+  <div class="designer-shell">
+    <aside class="designer-settings no-print" aria-labelledby="designerTitle">
+      <div class="settings-intro"><span class="section-eyebrow" data-ui="configuration">إعداد التقرير</span><h1 id="designerTitle" data-ui="designerTitle">تصميم وطباعة المواقف</h1><p data-ui="designerDesc">اختر الحقول وترتيب العرض ثم راجع نسخة A4 قبل الطباعة أو الحفظ PDF.</p></div>
+      <div class="report-context"><span class="context-icon">▤</span><div><small data-ui="reportSource">الموقف المحدد</small><strong id="reportSource">جارٍ تحميل التقرير...</strong><span id="sourceCounter">—</span></div></div>
+      <div class="settings-scroll">
+        <section class="settings-group">
+          <h2><span>01</span> <span data-ui="documentSettings">إعدادات الصفحة</span></h2>
+          <label class="control-label" for="customTitle" data-ui="titleLabel">عنوان التقرير</label>
+          <input id="customTitle" maxlength="120" type="text" placeholder="موقف المواد قريبة النفاذ">
+          <label class="control-label" for="customSubtitle" data-ui="subtitleLabel">عنوان فرعي (اختياري)</label>
+          <input id="customSubtitle" maxlength="120" type="text" placeholder="تقرير مخزني حسب البيانات الحالية">
+          <span class="control-label" id="paperOrientationLabel" data-ui="paperOrientation">اتجاه ورقة A4</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="paperOrientationLabel"><label><input type="radio" name="orientation" value="landscape" checked><span><b>▭</b><span data-ui="landscape">أفقي</span></span></label><label><input type="radio" name="orientation" value="portrait"><span><b>▯</b><span data-ui="portrait">عمودي</span></span></label></div>
+          <span class="control-label" id="lotModeLabel" data-ui="lotPresentation">طريقة عرض الوجبات</span>
+          <div class="stacked-options" role="radiogroup" aria-labelledby="lotModeLabel"><label><input type="radio" name="lotMode" value="lots" checked><span><b data-ui="eachLot">كل وجبة بسطر مستقل</b><small data-ui="eachLotHint">الصلاحية والكمية والسعر لكل وجبة</small></span></label><label><input type="radio" name="lotMode" value="summary"><span><b data-ui="oneItem">سطر واحد لكل مادة</b><small data-ui="oneItemHint">الكمية الإجمالية المشمولة في الموقف</small></span></label></div>
+        </section>
+        <section class="settings-group">
+          <div class="group-head"><h2><span>02</span> <span data-ui="columns">أعمدة التقرير</span></h2><span id="selectedCount" class="selected-count">7</span></div>
+          <p class="group-note" data-ui="columnHint">اختر فقط الحقول التي تريد ظهورها في النسخة المطبوعة.</p>
+          <div class="column-bulk"><button type="button" id="allColumns" data-ui="selectAll">تحديد الكل</button><button type="button" id="defaultColumns" data-ui="defaults">الافتراضي</button><button type="button" id="minimalColumns" data-ui="compact">مختصر</button></div>
+          <div id="columnChoices" class="column-choices"></div>
+        </section>
+        <section class="settings-group">
+          <h2><span>03</span> <span data-ui="finalTouches">تفاصيل الطباعة</span></h2>
+          <label class="toggle-option"><input type="checkbox" id="showBrand" checked><span data-ui="showLogo">إظهار شعار المذخر IMS</span></label>
+          <label class="toggle-option"><input type="checkbox" id="showFilters" checked><span data-ui="showFilters">إظهار الفلاتر المستخدمة</span></label>
+          <label class="toggle-option"><input type="checkbox" id="showSignature" checked><span data-ui="signature">إظهار خانة التوقيع</span></label>
+          <p class="privacy-hint" data-ui="liveData">تستخدم الطباعة بيانات النظام الحالية للقراءة فقط، ولا تُغيّر أي مخزون أو سجل.</p>
+        </section>
+      </div>
+      <div class="settings-actions"><button id="printButton" class="primary-action" type="button"><span aria-hidden="true">▤</span><span data-ui="print">طباعة / حفظ PDF</span></button><button id="resetButton" type="button" class="secondary-action" data-ui="reset">استعادة الإعدادات</button></div>
+    </aside>
+    <main class="preview-area" aria-labelledby="previewTitle">
+      <div class="preview-bar no-print"><div><span class="section-eyebrow" data-ui="livePreview">معاينة مباشرة</span><h2 id="previewTitle" data-ui="previewTitle">نسخة التقرير الجاهزة للطباعة</h2><p id="previewStatus" aria-live="polite" data-ui="preparing">جارٍ تجهيز البيانات...</p></div><div class="preview-bar-actions"><span id="pageCounter" class="preview-pages">—</span><button id="refreshButton" type="button" class="mini-button" data-ui="refresh">تحديث المعاينة ↻</button></div></div>
+      <div id="printWarning" class="print-warning no-print" hidden></div>
+      <div class="print-stage" id="printStage"><div class="loading-card" id="loadingCard"><div class="loader"></div><strong data-ui="loading">جارٍ تحميل بيانات الموقف...</strong><span data-ui="loadingHint">قد يستغرق التقرير الكبير بضع لحظات</span></div><div id="paperPages" aria-live="polite"></div></div>
+    </main>
+  </div>
+</div>
+<script src="/static/print-report.js?v=4.27.1" defer></script>
+</body>
+</html>

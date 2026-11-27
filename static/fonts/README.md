@@ -1,14 +1,17 @@
-# Optional local Arabic headline fonts
+# IMS V4.27.1 — new, user-supplied fonts
 
-The application works immediately using Changa and Marhey (served by Google Fonts) as public heading fallbacks. It **does not include your privately supplied TTF files**.
+The complete application ZIP intentionally contains **no font binaries**. To activate the two fonts you provided, place your own copies in this folder under these EXACT file names:
 
-To activate your exact fonts, copy your own copies of these two files into this directory before uploading to your private GitHub repository:
+1. `SC_DUBAI.ttf` — primary Arabic headlines on Home, Login, legal pages, and main dashboard headings.
+2. `VIP Rawy Thin Thin.otf` — large, light-weight Arabic hero accent/section-kicker text.
 
-- `Amine_mod.ttf` — main Arabic headlines
-- `banda.ttf` — small accent headings
+The files must be included in your PRIVATE GitHub repository when Railway deploys. The browser requests these URLs:
 
-The filename must match letter-for-letter (Linux is case-sensitive). Both files must be committed to your GitHub repository for Railway to serve them. Do not add B-Arabic-Style-1.ttf; it is not used.
+- `https://YOUR-DOMAIN/static/fonts/SC_DUBAI.ttf`
+- `https://YOUR-DOMAIN/static/fonts/VIP%20Rawy%20Thin%20Thin.otf`
 
-After deployment, check `/static/fonts/Amine_mod.ttf` and `/static/fonts/banda.ttf` in the browser. They should load as fonts, not as a 404 or the homepage HTML. Use the script `check_font_deployment.py https://your-domain.example` to validate the uploaded files.
+A successful response contains font data, not a 404 or homepage HTML. Your server's network controls must permit these assets. On deployment, clear the browser cache (Ctrl+Shift+R). The site falls back to Cairo if either file is absent.
 
-Use fonts only if you hold the necessary rights to host them. The ZIP itself does not distribute any font binaries.
+Other old fonts (`Amine_mod.ttf` and `banda.ttf`) are no longer referenced in the styles. You may remove them from your own repo after confirming everything works.
+
+Please host these files only if you have the relevant font usage and web-embedding rights.

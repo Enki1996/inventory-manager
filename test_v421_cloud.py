@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ['WAREHOUSE_BACKUP_CRON_SECRET']='s'*64
     from app import app, APP_RELEASE, SCHEMA_VERSION, produce_sqlite_snapshot
     import google_drive_backup as gd
-    assert APP_RELEASE=='4.26.0' and SCHEMA_VERSION==10
+    assert APP_RELEASE=='4.27.1' and SCHEMA_VERSION==10
 
     class Response:
         def __init__(self, content=None,headers=None):
