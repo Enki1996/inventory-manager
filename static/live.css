@@ -339,3 +339,16 @@ body.column-dialog-open{overflow:hidden}
 .movement-line-summary .tiny{margin-block-start:0;}
 .gdrive-file{flex-wrap:wrap;}
 .gdrive-file .db-btn{white-space:normal;}
+
+/* V4.25 recovery confirmation layout; lines, reason and password occupy full rows. */
+.modal-body:has(#recoveryForm){width:min(690px,100%)}
+#recoveryForm .db-grid{grid-template-columns:minmax(0,1fr);gap:14px}
+.recovery-lines{border:1px solid #d8e9ee;background:#f7fcfd;border-radius:12px;padding:10px;display:grid;gap:8px;max-height:245px;overflow-y:auto}
+.recovery-line{display:flex;align-items:center;gap:12px;padding:11px 12px;background:#fff;border:1px solid #e0edf0;border-radius:10px;cursor:pointer}
+.recovery-line:has(input:disabled){opacity:.55;cursor:not-allowed}
+.recovery-line input{accent-color:#008d8c;width:17px;height:17px;flex:none}
+.recovery-line span{display:grid;gap:4px;min-width:0}
+.recovery-line strong{font-size:12px;color:#163f54}
+.recovery-line small{font-size:11px;color:#6c8999;line-height:1.7}
+#recoveryForm textarea{min-height:96px;resize:vertical}
+@media(max-width:650px){.modal-body:has(#recoveryForm){width:100%}.recovery-line{align-items:flex-start}}

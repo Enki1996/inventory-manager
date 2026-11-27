@@ -1,3 +1,7 @@
+## Current release: V4.25 — Controlled Undo/Redo
+
+See **V4_25_CHANGES.md**. This is an additive migration to **Schema V10**, with selective shipment Undo, Ultra Admin Redo and eligible audit-edit recovery, plus neutral legal pages and optional supplied-font styling. **Back up first, redeploy the same Railway service, and keep `/data` attached. Do not restore a database as part of an ordinary code update.** Verify `/api/health` reports `release: 4.25.0`, `version: 10`.
+
 ## V4.20 update
 
 See `V4_20_CHANGES.md`. Schema V9 unchanged. Keep existing `/data` volume and back up before updating.

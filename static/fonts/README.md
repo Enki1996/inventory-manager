@@ -1,0 +1,1 @@
+Optional user-supplied local Arabic fonts (not included in distribution): place Amine_mod.ttf and banda.ttf here to activate display styling. B-Arabic-Style-1.ttf was reviewed but is not used due to legibility. Use only fonts you have rights to deploy. The website falls back to system fonts otherwise.

@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as tmp:
     os.environ['WAREHOUSE_BACKUP_CRON_SECRET']='s'*64
     from app import app, APP_RELEASE, SCHEMA_VERSION, produce_sqlite_snapshot
     import google_drive_backup as gd
-    assert APP_RELEASE=='4.24.0' and SCHEMA_VERSION==9
+    assert APP_RELEASE=='4.25.0' and SCHEMA_VERSION==10
 
     class Response:
         def __init__(self, content=None,headers=None):
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as tmp:
             restored=c.get('/api/gdrive/download/'+fid)
             import io,zipfile,json
             assert restored.status_code==200, (restored.status_code, restored.text[:500]); z=zipfile.ZipFile(io.BytesIO(restored.content))
-            assert json.loads(z.read('manifest.json'))['schema_version']==9
+            assert json.loads(z.read('manifest.json'))['schema_version']==10
             assert z.read('warehouse.sqlite3').startswith(b'SQLite format 3')
             assert not drive_files[-1]['payload'].startswith(b'PK')
             assert gd.decode_secure(gd.encode_secure(b'hello'))==b'hello'

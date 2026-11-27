@@ -1,4 +1,4 @@
-/* Live V4.22 bilingual warehouse application: all stock, including opening balances, is audited. */
+/* V4.25 controlled recovery UI; originals remain auditable. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -249,7 +249,7 @@ const filterBookOptions = (branch='', selected='') => {
 };
 
 const typeLabel = {IN:'Stock receipt voucher',OUT:'Stock issue voucher',RETURN:'Internal return',ADJUST_PLUS:'Stock increase',ADJUST_MINUS:'Stock decrease'};
-const movementLabel=m=>m.route==='opening_balance'?'Opening balance':(typeLabel[m.kind]||m.kind);
+const movementLabel=m=>m.route==='recovery_undo'?'Undo correction':m.route==='recovery_redo'?'Redo correction':m.route==='opening_balance'?'Opening balance':(typeLabel[m.kind]||m.kind);
 const movementBadgeType={IN:'intake',OUT:'dispatch',RETURN:'return-type',ADJUST_PLUS:'adjustment',ADJUST_MINUS:'adjustment'};
 async function api(path,{method='GET',data,headers={},body}={}){
   let h={...headers}; if(method!=='GET')h['X-CSRF-Token']=csrf;
@@ -354,7 +354,7 @@ function filterInventory(){
  window.HWLang?.apply();
 }
 function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.name)}</strong></td><td>${it.last_shipment_at?D(it.last_shipment_at):'<span class="muted-hint">No shipments yet</span>'}</td><td>${N(it.shipment_count)} </td><td>${badge(it.active?'Active':'Inactive',it.active?'':'danger')}</td><td><div class="db-small-actions"><button type="button" data-open-dept-shipments="${it.id}">Shipment history</button>${can('department_write')?`<button type="button" data-edit-dept="${it.id}">Edit</button>`:''}</div></td></tr>`)}
-const routeNames={opening_balance:'Opening balance',department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
+const routeNames={recovery_undo:'Controlled Undo',recovery_redo:'Controlled Redo',opening_balance:'Opening balance',department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
 function movementRows(movements){return movements.map(m=>{
  const pending=m.paperwork_pending===1;
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
@@ -363,7 +363,9 @@ function movementRows(movements){return movements.map(m=>{
  const lines=Array.isArray(m.lines)?m.lines:[],first=lines[0];
  const preview=first?`<div class="movement-line-summary"><strong>${E(first.item_name)}</strong><span class="tiny">${E(first.batch_no)} · ${N(first.qty)} ${E(unitLabel(first.unit))}</span></div>`:'<span class="muted-hint">No lines recorded</span>';
  const countLabel=lines.length===1?'1 item':`${N(lines.length)} items`;
- return `<tr class="movement-master-row" data-movement-master="${m.id}"><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td><div class="movement-lines-cell">${preview}<button type="button" class="movement-expand-btn" data-expand-movement="${m.id}" aria-expanded="false" aria-label="${E('Show all receipt items')}" title="${E('Full receipt details')}"><span class="movement-count-pill">${E(countLabel)}</span><span class="movement-chevron" aria-hidden="true">▾</span></button></div></td><td>${E(m.creator)}</td></tr>`;
+ const recoveryButton=user?.role==='admin'&&m.route!=='recovery_undo'&&m.route!=='recovery_redo'?
+  `<button type="button" class="db-btn secondary small" data-recover-movement="${m.id}" style="margin-top:7px" aria-label="Undo selected items in ${E(m.code)}">Undo / تصحيح</button>`:'';
+ return `<tr class="movement-master-row" data-movement-master="${m.id}"><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div>${recoveryButton}</td><td>${badge(movementLabel(m),m.route==='recovery_undo'?'adjustment':m.route==='recovery_redo'?'blue':m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td><div class="movement-lines-cell">${preview}<button type="button" class="movement-expand-btn" data-expand-movement="${m.id}" aria-expanded="false" aria-label="${E('Show all receipt items')}" title="${E('Full receipt details')}"><span class="movement-count-pill">${E(countLabel)}</span><span class="movement-chevron" aria-hidden="true">▾</span></button></div></td><td>${E(m.creator)}</td></tr>`;
  });}
 // Expand a document without another database call. The existing /api/movements
 // response already contains every line for each returned receipt/issue.
@@ -806,7 +808,7 @@ function filterStatement(){
  const count=$('#statementShown');if(count)count.textContent=`${N(rows.length)} of ${N(matched.length)} items · ${N(data.length)} matching records`;
  window.HWLang?.apply();
 }
-function settings(){if(user?.role!=='admin')return msg('Access denied','Only administrators can view audit logs.');return `${head('Audit logs','Administrator-only log of application activity, account changes and stock operations.')}
+function settings(){if(user?.role!=='admin')return msg('Access denied','Only administrators can view audit logs.');return `${head('Audit logs','Permanent events and correction records. Only the ultra administrator can Undo actions from here or Redo them.')}
 ${panel('Operations audit trail',`<div id="auditLog">Loading events...</div>`,'history')}`}
 const pages={overview,inventory,item_movement:itemMovements,profile:profilePage,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
 function showPage(next){
@@ -1019,7 +1021,94 @@ async function postShipment(kind,form,lines){
 }
 function routeToMovements(){route('movements')}
 
-async function loadAudit(){try{const a=await api('/api/audit');if(view!=='settings')return;$('#auditLog').innerHTML=table(['Date / time','Action','Operator','Detail'],a.map(x=>`<tr><td>${D(x.created_at)}</td><td>${E(x.action)}</td><td>${E(x.username||'System')}</td><td><span class="tiny">${E(x.detail).slice(0,220)}</span></td></tr>`))}catch(e){if($('#auditLog'))$('#auditLog').textContent=e.message}}
+function auditRecoveryActions(x,events){
+ if(!user?.is_ultra_admin)return '';
+ let d={};try{d=JSON.parse(x.detail)}catch(_e){}
+ const detailOf=y=>{try{return JSON.parse(y.detail)}catch(_e){return {}}};
+ if(x.action==='MOVEMENT_UNDO'&&d.undo_movement_id){
+  const already=events.some(y=>y.action==='MOVEMENT_REDO'&&detailOf(y).undo_movement_id===d.undo_movement_id);
+  return already?badge('Redone','blue'):`<button class="db-btn secondary small" data-recovery-redo="${Number(d.undo_movement_id)}">Redo / إعادة</button>`;
+ }
+ if(x.action==='AUDIT_EDIT_UNDO'&&d.source_audit_id){
+  const already=events.some(y=>y.action==='AUDIT_EDIT_REDO'&&detailOf(y).source_audit_id===d.source_audit_id);
+  return already?badge('Redone','blue'):`<button class="db-btn secondary small" data-recovery-audit-redo="${Number(d.source_audit_id)}">Redo edit</button>`;
+ }
+ if(x.action==='MOVEMENT_CREATED'&&d.id)return `<button class="db-btn secondary small" data-recover-movement="${Number(d.id)}" data-source-audit="${x.id}">Undo</button>`;
+ if(x.action==='OPENING_BALANCE_CREATED'&&d.movement_id)return `<button class="db-btn secondary small" data-recover-movement="${Number(d.movement_id)}" data-source-audit="${x.id}">Undo</button>`;
+ if(['ITEM_UPDATED','DEPARTMENT_UPDATED','USER_UPDATED'].includes(x.action)&&d.before&&d.after){
+  const undone=events.some(y=>y.action==='AUDIT_EDIT_UNDO'&&detailOf(y).source_audit_id===x.id);
+  return undone?badge('Recovery recorded','blue'):`<button class="db-btn secondary small" data-recovery-audit-edit="${x.id}">Undo edit</button>`;
+ }
+ return '<span class="muted-hint">—</span>';
+}
+function auditEventSummary(x){
+ let d={};try{d=JSON.parse(x.detail)}catch(_e){return E(x.detail).slice(0,180)}
+ const label=x.action;
+ if(label==='MOVEMENT_UNDO')return `<strong>${E(d.original_code||'Movement')} → ${E(d.undo_code||'Undo')}</strong><div class="tiny">${E(d.reason||'')} · ${N(d.line_ids?.length||0)} line(s)</div>`;
+ if(label==='MOVEMENT_REDO')return `<strong>${E(d.undo_code||'Undo')} → ${E(d.redo_code||'Redo')}</strong><div class="tiny">${E(d.reason||'')}</div>`;
+ if(label==='AUDIT_EDIT_UNDO'||label==='AUDIT_EDIT_REDO')return `<strong>${E(d.source_action||'Edit')} · #${E(d.object_id||'')}</strong><div class="tiny">${E(d.reason||'')}</div>`;
+ if(label==='MOVEMENT_CREATED')return `<strong>${E(d.code||'—')}</strong><div class="tiny">${E(d.route||'')} · ${N(d.line_count||0)} line(s)</div>`;
+ if(label==='OPENING_BALANCE_CREATED')return `<strong>${E(d.code||'Opening balance')}</strong><div class="tiny">${N(d.quantity||0)} units in ${N(d.lot_count||1)} lot(s)</div>`;
+ if(['ITEM_UPDATED','DEPARTMENT_UPDATED','USER_UPDATED'].includes(label))return `<strong>#${E(d.id||'')} · ${E(d.name||d.sku||'Edited record')}</strong><div class="tiny">${E(d.branch||d.role||'')} ${d.before&&d.after?'· Before/after saved':''}</div>`;
+ return `<span class="tiny">${E(x.detail).slice(0,200)}</span>`;
+}
+async function loadAudit(){try{
+ const a=await api('/api/audit');if(view!=='settings')return;
+ $('#auditLog').innerHTML=table(['Date / time','Action','Operator','Detail','Recovery'],a.map(x=>`<tr><td>${D(x.created_at)}</td><td>${E(x.action)}</td><td>${E(x.username||'System')}</td><td>${auditEventSummary(x)}</td><td>${auditRecoveryActions(x,a)}</td></tr>`));
+ window.HWLang?.apply();
+}catch(e){if($('#auditLog'))$('#auditLog').textContent=e.message}}
+async function openMovementUndo(movementId,auditId){
+ try{
+  const info=await api('/api/recovery/movement/'+movementId);
+  const eligible=info.lines.filter(x=>x.eligible);
+  if(!eligible.length){toast('No eligible lines remain to undo. An active reversal or permission restriction may apply.','error');return;}
+  const lineList=info.lines.map(l=>`<label class="recovery-line"><input type="checkbox" name="line_ids" value="${l.id}" ${l.eligible?'checked':'disabled'}><span><strong>${E(l.item_name)}</strong><small>${E(l.batch_no)} · ${E(l.expiry_date||'—')} · ${N(l.qty)} ${E(unitLabel(l.unit))} · ${N(l.on_hand)} available ${l.active_undo?' · Already undone':''}</small></span></label>`).join('');
+  modalOpen('Undo recorded shipment · '+info.movement.code,
+   'Select one or more lines to reverse. Original records remain intact. Use actual returns for goods physically returned to the warehouse.',
+   `<div class="recovery-lines">${lineList}</div>`+
+   field('Reason for correction',`<textarea class="db-input" name="reason" minlength="8" maxlength="500" rows="3" required placeholder="Explain why these stock records need reversal"></textarea>`)+
+   field('Administrator password',`<input class="db-input" type="password" name="password" autocomplete="current-password" required>`)+
+   field('Type UNDO to confirm',`<input class="db-input" name="confirmation" pattern="UNDO" autocomplete="off" required placeholder="UNDO">`),
+   'recovery-undo','Confirm Undo');
+  const f=$('#entityForm');f.id='recoveryForm';f.dataset.recoveryMode='undo';f.dataset.movementId=movementId;f.dataset.auditId=auditId||'';
+  f.querySelector('[type="submit"]').classList.add('danger');
+ }catch(err){toast(err.message,'error')}
+}
+function openRecoveryRedo(undoMovementId,auditEditId=0){
+ modalOpen('Redo previous Undo',
+ 'This re-applies a successful reversal only after current stock checks. It cannot redo a failed Undo. Ultra administrator only.',
+ field('Why must this Undo be redone?',`<textarea class="db-input" name="reason" minlength="8" maxlength="500" rows="3" required></textarea>`)+
+ field('Ultra-admin password',`<input class="db-input" type="password" name="password" autocomplete="current-password" required>`)+
+ field('Type REDO',`<input class="db-input" name="confirmation" pattern="REDO" autocomplete="off" required placeholder="REDO">`),
+ 'recovery-redo','Confirm Redo');
+ const f=$('#entityForm');f.id='recoveryForm';f.dataset.recoveryMode=auditEditId?'audit-redo':'redo';f.dataset.undoMovementId=undoMovementId||'';f.dataset.auditId=auditEditId||'';
+}
+function openAuditEditUndo(auditId){
+ modalOpen('Undo eligible audit edit',
+ 'Only changes with complete before/after records can be recovered. If the record was edited again, recovery will be blocked. Ultra administrator only.',
+ field('Correction reason',`<textarea class="db-input" name="reason" minlength="8" maxlength="500" rows="3" required></textarea>`)+
+ field('Ultra-admin password',`<input class="db-input" type="password" name="password" autocomplete="current-password" required>`)+
+ field('Type UNDO',`<input class="db-input" name="confirmation" pattern="UNDO" required placeholder="UNDO">`),
+ 'recovery-audit-undo','Confirm Undo');
+ const f=$('#entityForm');f.id='recoveryForm';f.dataset.recoveryMode='audit-undo';f.dataset.auditId=auditId;
+}
+async function submitRecovery(form){
+ const data=Object.fromEntries(new FormData(form).entries());const mode=form.dataset.recoveryMode;
+ let endpoint='';
+ if(mode==='undo'){
+  data.movement_id=Number(form.dataset.movementId);
+  data.line_ids=[...form.querySelectorAll('[name="line_ids"]:checked')].map(el=>Number(el.value));
+  if(!data.line_ids.length)throw Error('Select at least one item line');
+  endpoint=form.dataset.auditId?'/api/recovery/audit/'+Number(form.dataset.auditId)+'/undo':'/api/recovery/undo';
+ }else if(mode==='redo'){data.undo_movement_id=Number(form.dataset.undoMovementId);endpoint='/api/recovery/redo';}
+ else if(mode==='audit-undo')endpoint='/api/recovery/audit/'+Number(form.dataset.auditId)+'/undo';
+ else if(mode==='audit-redo')endpoint='/api/recovery/audit/'+Number(form.dataset.auditId)+'/redo';
+ else throw Error('Unknown recovery operation');
+ delete data.line_ids_placeholder;
+ const res=await api(endpoint,{method:'POST',data});
+ modalClose();await refreshData();showPage(view);toast('Recovery saved as a new, permanent audit event. '+(res.undo_code||res.redo_code||''));
+}
+
 // Google Drive account, schedule, and backup history are admin-only. No keys or
 // refresh tokens are ever sent to the browser.
 async function loadGoogleDriveStatus(){
@@ -1076,6 +1165,10 @@ function completeMovementPapers(m){
   `paperwork:${m.id}`,'Complete paperwork');
 }
 document.addEventListener('click',async e=>{
+ const recoverMove=e.target.closest('[data-recover-movement]');if(recoverMove){await openMovementUndo(Number(recoverMove.dataset.recoverMovement),Number(recoverMove.dataset.sourceAudit)||0);return;}
+ const redoMove=e.target.closest('[data-recovery-redo]');if(redoMove){openRecoveryRedo(Number(redoMove.dataset.recoveryRedo));return;}
+ const undoEdit=e.target.closest('[data-recovery-audit-edit]');if(undoEdit){openAuditEditUndo(Number(undoEdit.dataset.recoveryAuditEdit));return;}
+ const redoEdit=e.target.closest('[data-recovery-audit-redo]');if(redoEdit){openRecoveryRedo(0,Number(redoEdit.dataset.recoveryAuditRedo));return;}
  const movementToggle=e.target.closest('[data-expand-movement]');if(movementToggle){toggleMovementDetails(movementToggle);return;}
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
  const expand=e.target.closest('[data-expand-item]');if(expand){
@@ -1152,10 +1245,11 @@ document.addEventListener('click',async e=>{
  if(e.target.closest('#gdriveDisconnect')){try{await disconnectGDrive()}catch(err){toast(err.message,'error')}return}
 });
 document.addEventListener('submit',async e=>{
- const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','profileForm','restoreForm','cloudRestoreForm'].includes(form.id))return;
+ const form=e.target;if(!['entityForm','receiveForm','issueForm','adjustForm','passwordForm','profileForm','restoreForm','cloudRestoreForm','recoveryForm'].includes(form.id))return;
  e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;
  try{
   if(form.id==='entityForm')await submitEntity(form);
+  if(form.id==='recoveryForm')await submitRecovery(form);
   if(form.id==='receiveForm')await postShipment('IN',form,extractLines($('#receiptLines'),$('#receiptLines').dataset.returnMode==='1'?'issue':'receive'));
   if(form.id==='issueForm')await postShipment('OUT',form,extractLines($('#issueLines'),'issue'));
   if(form.id==='adjustForm')await postShipment(new FormData(form).get('kind'),form,extractLines($('#adjustLines'),'issue'));

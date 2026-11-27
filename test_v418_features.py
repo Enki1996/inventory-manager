@@ -7,7 +7,7 @@ with tempfile.TemporaryDirectory() as temp:
     os.environ['WAREHOUSE_DATA_DIR']=temp
     os.environ.pop('WAREHOUSE_PUBLIC_DEPLOY',None)
     from app import app, db, SCHEMA_VERSION, APP_RELEASE
-    assert (SCHEMA_VERSION,APP_RELEASE)==(9,'4.24.0')
+    assert (SCHEMA_VERSION,APP_RELEASE)==(10,'4.25.0')
     with TestClient(app) as client:
         def ok(response):
             assert response.status_code==200,(response.status_code,response.text[:1200]); return response.json()
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as temp:
         # Restore of V9 backup preserves profile, lot manufacturing dates and movement grouping.
         exported=client.get('/api/backup/export');assert exported.status_code==200
         with zipfile.ZipFile(io.BytesIO(exported.content)) as z:
-            assert json.loads(z.read('manifest.json'))['schema_version']==9
+            assert json.loads(z.read('manifest.json'))['schema_version']==10
         ok(client.post('/api/backup/restore',files={'backup':('V9.zip',exported.content,'application/zip')},headers={**h,'X-Restore-Confirmation':'RESTORE'}))
         ok(client.post('/api/login',json={'username':'enki','password':'123'}))
         assert ok(client.get('/api/profile'))['phone']=='+964 770 123 4567'

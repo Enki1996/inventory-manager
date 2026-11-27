@@ -50,9 +50,9 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.24.0'
+APP_RELEASE = '4.25.0'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -484,6 +484,35 @@ def seed_default_departments(c: sqlite3.Connection):
                   ('DEPARTMENTS_SEEDED', json.dumps({'number_added': added, 'release': APP_RELEASE}, ensure_ascii=False), now()))
 
 
+def migrate_recovery_v10(c: sqlite3.Connection):
+    """Append-only correction links. Never alter the original movement or audit entry."""
+    c.executescript("""
+      CREATE TABLE IF NOT EXISTS movement_reversals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        original_line_id INTEGER NOT NULL REFERENCES movement_lines(id) ON DELETE RESTRICT,
+        undo_line_id INTEGER NOT NULL UNIQUE REFERENCES movement_lines(id) ON DELETE RESTRICT,
+        redo_line_id INTEGER UNIQUE REFERENCES movement_lines(id) ON DELETE RESTRICT,
+        undone_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        undone_at TEXT NOT NULL,
+        undo_reason TEXT NOT NULL,
+        redone_by INTEGER REFERENCES users(id) ON DELETE RESTRICT,
+        redone_at TEXT,
+        redo_reason TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS one_active_undo_per_line
+        ON movement_reversals(original_line_id) WHERE redo_line_id IS NULL;
+      CREATE TABLE IF NOT EXISTS audit_field_reversals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        original_audit_id INTEGER NOT NULL UNIQUE REFERENCES audit_log(id) ON DELETE RESTRICT,
+        undo_audit_id INTEGER NOT NULL UNIQUE REFERENCES audit_log(id) ON DELETE RESTRICT,
+        redo_audit_id INTEGER UNIQUE REFERENCES audit_log(id) ON DELETE RESTRICT,
+        object_type TEXT NOT NULL,
+        object_id INTEGER NOT NULL
+      );
+    """)
+    c.execute("INSERT INTO app_meta(key,value) VALUES('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
+
+
 def init_db():
     with db() as c:
         c.executescript('''
@@ -591,6 +620,7 @@ def init_db():
         migrate_per_receipt_pricing_and_transfer_authorization(c)
         migrate_annual_need(c)
         migrate_v9(c)
+        migrate_recovery_v10(c)
         seed_default_departments(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
@@ -875,12 +905,12 @@ async def update_department(department_id: int, request: Request):
     name = validated_text(d, 'name')
     try:
         with db() as c:
-            old = c.execute('SELECT code FROM departments WHERE id=?', (department_id,)).fetchone()
+            old = c.execute('SELECT code,name,active FROM departments WHERE id=?', (department_id,)).fetchone()
             if not old:
                 err(404, 'Department not found')
             c.execute('UPDATE departments SET name=?,active=? WHERE id=?',
                       (name, 1 if d.get('active', True) else 0, department_id))
-            audit(c, u['id'], 'DEPARTMENT_UPDATED', {'id': department_id, 'name': name, 'code': old['code'], 'active': bool(d.get('active', True))})
+            audit(c, u['id'], 'DEPARTMENT_UPDATED', {'id': department_id, 'name': name, 'code': old['code'], 'active': bool(d.get('active', True)), 'before': {'name': old['name'], 'active': old['active']}, 'after': {'name': name, 'active': 1 if d.get('active', True) else 0}})
         return {'ok': True}
     except sqlite3.IntegrityError:
         err(409, 'Department name or code already exists')
@@ -1038,9 +1068,13 @@ async def update_item(item_id: int, request: Request):
                          manufacturer=?,manufacture_date=?,expiry_date=?,information=?,price_fils=?,annual_need=?,active=? WHERE id=?''',
                       (sku,name,category,branch,unit,generic,trade,batch_no,manufacturer,mfg,exp,info,unit_price,annual_need,
                        1 if d.get('active',True) else 0,item_id))
+            item_keys = ('sku','name','category','branch','unit','generic_name','trade_name','initial_batch_no',
+                         'manufacturer','manufacture_date','expiry_date','information','price_fils','annual_need','active')
+            new_snapshot = dict(c.execute('SELECT * FROM items WHERE id=?',(item_id,)).fetchone())
             audit(c, u['id'], 'ITEM_UPDATED', {'id':item_id,'sku':sku,'name':name,'trade_name':trade,
                   'branch':branch,'book_category':category,'unit':unit,'reference_batch_no':batch_no,
-                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price,'annual_need':annual_need})
+                  'manufacturer':manufacturer,'manufacture_date':mfg,'expiry_date':exp,'information':info,'price_fils':unit_price,'annual_need':annual_need,
+                  'before':{k:old[k] for k in item_keys}, 'after':{k:new_snapshot[k] for k in item_keys}})
         return {'ok': True}
     except sqlite3.IntegrityError:
         err(409, 'Item code or registered batch already exists')
@@ -1153,7 +1187,7 @@ def movements(request: Request):
         ids = [x['id'] for x in res]
         if ids:
             ph = ','.join('?' for _ in ids)
-            lines = [dict(x) for x in c.execute(f'''SELECT ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,b.batch_no,b.expiry_date,b.manufacture_date,
+            lines = [dict(x) for x in c.execute(f'''SELECT ml.id line_id,ml.movement_id,ml.qty,ml.direction,ml.unit_price_fils,b.batch_no,b.expiry_date,b.manufacture_date,
                              i.sku,i.name item_name,i.unit FROM movement_lines ml
                              JOIN batches b ON b.id=ml.batch_id JOIN items i ON i.id=b.item_id
                              WHERE ml.movement_id IN ({ph}) ORDER BY ml.id''', ids)]
@@ -1624,7 +1658,7 @@ async def edit_user(user_id: int, request: Request):
         c.execute('UPDATE users SET role=?,branch=?,is_active=? WHERE id=?',(role,branch,active,user_id))
         if role != target['role'] or branch != target['branch'] or not active:
             c.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
-        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'branch':branch,'active':bool(active)})
+        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'branch':branch,'active':bool(active), 'before': {'role':target['role'],'branch':target['branch'],'is_active':target['is_active']}, 'after':{'role':role,'branch':branch,'is_active':active}})
     return {'ok':True}
 
 
@@ -1797,6 +1831,12 @@ def restore_backup_bytes(content, u, *, cloud_file_id=None):
             else:
                 if 'manufacture_date' not in {r[1] for r in verify.execute('PRAGMA table_info(batches)')} or not {'email','phone','age','job_title'}.issubset({r[1] for r in verify.execute('PRAGMA table_info(users)')}):
                     err(422, 'Backup declares V9 but is missing lot manufacturing or profile columns')
+            if version < 10:
+                migrate_recovery_v10(verify)
+            else:
+                tables_v10 = {r[0] for r in verify.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if not {'movement_reversals','audit_field_reversals'}.issubset(tables_v10):
+                    err(422, 'Backup declares V10 but is missing recovery tables')
             seed_default_departments(verify)  # Older backups gain starter departments without deleting user records.
             verify.commit()
         except sqlite3.DatabaseError:
@@ -1983,6 +2023,280 @@ async def gdrive_restore(file_id: str, request: Request):
     u = get_user(request, require_csrf=True)
     permit_cloud(u)
     return restore_backup_bytes(content, u, cloud_file_id=file_id)
+
+
+# V4.25 recovery endpoints: stock reversals are NEW movements and NEW audit
+# records. Original movements and audit events are immutable.
+
+def recovery_auth(c, user, data, action, *, owner=False):
+    if owner:
+        if not is_ultra_admin(user):
+            err(403, 'Only the ultra administrator may perform this recovery')
+    elif user['role'] != 'admin':
+        err(403, 'Only administrators may undo recorded movements')
+    if data.get('confirmation') != action:
+        err(422, f'Type {action} to confirm the correction')
+    reason = validated_text(data, 'reason', max_len=500)
+    if len(reason) < 8:
+        err(422, 'Explain the correction in at least 8 characters')
+    password = str(data.get('password') or '')
+    credentials = c.execute('SELECT password_hash FROM users WHERE id=? AND is_active=1', (user['id'],)).fetchone()
+    if not credentials or not pw_check(password, credentials['password_hash']):
+        err(403, 'Incorrect administrator password')
+    return reason
+
+
+def recovery_eligible_line(c, line_id):
+    return c.execute('''SELECT l.*, m.id movement_id,m.code original_code,m.kind original_kind,m.route original_route,
+                 b.on_hand,b.expiry_date,b.batch_no,i.name item_name,i.category book_category,i.branch
+                 FROM movement_lines l JOIN movements m ON m.id=l.movement_id
+                 JOIN batches b ON b.id=l.batch_id JOIN items i ON i.id=b.item_id WHERE l.id=?''', (line_id,)).fetchone()
+
+
+def recovery_undo(c, user, movement_id, line_ids, reason, *, audit_source=None):
+    original = c.execute('SELECT * FROM movements WHERE id=?', (movement_id,)).fetchone()
+    if not original:
+        err(404, 'Original movement not found')
+    if original['route'] in ('recovery_undo','recovery_redo'):
+        err(409, 'Recovery movements cannot be directly undone; use the linked Redo instead')
+    available = c.execute('SELECT id FROM movement_lines WHERE movement_id=? ORDER BY id', (movement_id,)).fetchall()
+    all_ids = [r['id'] for r in available]
+    if not all_ids:
+        err(409, 'No lines to undo')
+    if line_ids is None:
+        selected = all_ids
+    elif isinstance(line_ids,list) and line_ids and all(type(x) is int for x in line_ids) and len(set(line_ids)) == len(line_ids) and set(line_ids).issubset(all_ids):
+        selected = line_ids
+    else:
+        err(422, 'Choose one or more valid, nonduplicate shipment line IDs')
+    original_lines = []
+    for line_id in selected:
+        line = recovery_eligible_line(c,line_id)
+        active = c.execute('SELECT id FROM movement_reversals WHERE original_line_id=? AND redo_line_id IS NULL', (line_id,)).fetchone()
+        if active:
+            err(409, f'Line {line_id} already has an active Undo')
+        if line['direction'] > 0:
+            # An incoming/opening lot with later active issues has a dependent
+            # movement. Removing that original receipt would falsify provenance,
+            # even if subsequent receipts make the current balance sufficient.
+            dependent=c.execute('''SELECT 1 FROM movement_lines newer
+                 JOIN movements nm ON nm.id=newer.movement_id
+                 LEFT JOIN movement_reversals active_reverse
+                    ON active_reverse.original_line_id=newer.id AND active_reverse.redo_line_id IS NULL
+                 WHERE newer.batch_id=? AND newer.id>? AND newer.direction=-1
+                   AND nm.route NOT IN ('recovery_undo','recovery_redo')
+                   AND active_reverse.id IS NULL LIMIT 1''',(line['batch_id'],line['id'])).fetchone()
+            if dependent:
+                err(409,'Later stock issues depend on this incoming/opening lot. Undo those dependent issues first, or record an approved stock adjustment.')
+        if (('المخدرات' in (line['book_category'] or '')) or ('المؤثرات العقلية' in (line['book_category'] or ''))) and not is_ultra_admin(user):
+            err(403, 'Controlled-medication corrections require ultra-administrator authorization')
+        original_lines.append(line)
+    changes = {}
+    for line in original_lines:
+        changes[line['batch_id']] = changes.get(line['batch_id'],0) - line['qty']*line['direction']
+    for bid,delta in changes.items():
+        if delta < 0:
+            r = c.execute('SELECT on_hand FROM batches WHERE id=?',(bid,)).fetchone()
+            if not r or r['on_hand'] < -delta:
+                err(409,'Undo would result in negative stock. Later transactions have used this inventory; reconcile the physical balance first.')
+    inverse_direction = -original_lines[0]['direction']
+    if any(-l['direction'] != inverse_direction for l in original_lines):
+        err(409, 'Cannot mix positive and negative movements in one Undo')
+    correction_kind = 'ADJUST_PLUS' if inverse_direction==1 else 'ADJUST_MINUS'
+    created = c.execute('''INSERT INTO movements(code,kind,paper_ref,source,notes,route,created_by,created_at)
+              VALUES(?,?,?,?,?,?,?,?)''', ('TEMP-'+secrets.token_hex(7), correction_kind,
+              ('UNDO-'+original['code'])[:80], 'Controlled reversal',
+              'Undo of '+original['code']+' | '+reason,'recovery_undo',user['id'],now()))
+    undo_mid=created.lastrowid
+    code=f'UNDO-{undo_mid:06d}'
+    c.execute('UPDATE movements SET code=? WHERE id=?',(code,undo_mid))
+    output=[]
+    for line in original_lines:
+        delta=-line['direction']*line['qty']
+        if delta<0:
+            r=c.execute('UPDATE batches SET on_hand=on_hand+? WHERE id=? AND on_hand>=?',(delta,line['batch_id'],-delta))
+            if r.rowcount!=1:
+                err(409,'Stock changed while reversing the shipment')
+        else:
+            c.execute('UPDATE batches SET on_hand=on_hand+? WHERE id=?',(delta,line['batch_id']))
+        undo_line=c.execute('''INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils)
+                             VALUES (?,?,?,?,?)''',(undo_mid,line['batch_id'],line['qty'],-line['direction'],line['unit_price_fils'])).lastrowid
+        c.execute('''INSERT INTO movement_reversals(original_line_id,undo_line_id,undone_by,undone_at,undo_reason)
+                     VALUES (?,?,?,?,?)''',(line['id'],undo_line,user['id'],now(),reason))
+        output.append({'original_line_id':line['id'],'undo_line_id':undo_line,'batch_id':line['batch_id'],'qty':line['qty']})
+    audit(c,user['id'],'MOVEMENT_UNDO',{'movement_id':movement_id,'original_code':original['code'],
+          'undo_movement_id':undo_mid,'undo_code':code,'line_ids':selected,'reason':reason,
+          'source_audit_id':audit_source,'lines':output})
+    return {'ok':True,'undo_movement_id':undo_mid,'undo_code':code,'line_ids':selected}
+
+
+def recovery_redo(c,user,undo_mid,reason):
+    movement=c.execute('SELECT * FROM movements WHERE id=?',(undo_mid,)).fetchone()
+    if not movement or movement['route']!='recovery_undo':
+        err(404,'Original Undo movement was not found')
+    reverse=c.execute('''SELECT r.*, l.batch_id,l.qty,l.direction,l.unit_price_fils,l.movement_id original_movement_id,
+                                 m.kind original_kind,b.expiry_date,b.on_hand,i.category book_category
+                          FROM movement_reversals r JOIN movement_lines l ON l.id=r.original_line_id
+                          JOIN movements m ON m.id=l.movement_id JOIN batches b ON b.id=l.batch_id
+                          JOIN items i ON i.id=b.item_id
+                          JOIN movement_lines undo_line ON undo_line.id=r.undo_line_id
+                          WHERE undo_line.movement_id=? ORDER BY r.id''',(undo_mid,)).fetchall()
+    if not reverse or any(r['redo_line_id'] is not None for r in reverse):
+        err(409,'This Undo is already redone or is incomplete')
+    today=dt.datetime.now(ZoneInfo('Asia/Baghdad')).date().isoformat()
+    change={}
+    for r in reverse:
+        if r['original_kind']=='OUT' and r['expiry_date'] and r['expiry_date']<today:
+            err(409,'Cannot redo an outgoing issue of a now-expired lot')
+        change[r['batch_id']]=change.get(r['batch_id'],0)+r['qty']*r['direction']
+    for bid,delta in change.items():
+        if delta<0:
+            row=c.execute('SELECT on_hand FROM batches WHERE id=?',(bid,)).fetchone()
+            if not row or row['on_hand'] < -delta:
+                err(409,'Redo would make a stock balance negative; reconcile the batch first')
+    directions={r['direction'] for r in reverse}
+    if len(directions)!=1:err(409,'Mixed-direction correction requires manual review')
+    kind='ADJUST_PLUS' if next(iter(directions))==1 else 'ADJUST_MINUS'
+    rec=c.execute('''INSERT INTO movements(code,kind,paper_ref,source,notes,route,created_by,created_at)
+                   VALUES(?,?,?,?,?,?,?,?)''',('TEMP-'+secrets.token_hex(7),kind,('REDO-'+movement['code'])[:80],
+                      'Controlled reapplication','Redo of '+movement['code']+' | '+reason,'recovery_redo',user['id'],now()))
+    mid=rec.lastrowid;code=f'REDO-{mid:06d}'
+    c.execute('UPDATE movements SET code=? WHERE id=?',(code,mid))
+    for r in reverse:
+        delta=r['qty']*r['direction']
+        if delta<0:
+            updated=c.execute('UPDATE batches SET on_hand=on_hand+? WHERE id=? AND on_hand>=?',(delta,r['batch_id'],-delta))
+            if updated.rowcount!=1:err(409,'Insufficient batch stock for Redo')
+        else:
+            c.execute('UPDATE batches SET on_hand=on_hand+? WHERE id=?',(delta,r['batch_id']))
+        new_line=c.execute('''INSERT INTO movement_lines(movement_id,batch_id,qty,direction,unit_price_fils)
+                VALUES(?,?,?,?,?)''',(mid,r['batch_id'],r['qty'],r['direction'],r['unit_price_fils'])).lastrowid
+        c.execute('''UPDATE movement_reversals SET redo_line_id=?,redone_by=?,redone_at=?,redo_reason=? WHERE id=?''',
+                  (new_line,user['id'],now(),reason,r['id']))
+    audit(c,user['id'],'MOVEMENT_REDO',{'undo_movement_id':undo_mid,'undo_code':movement['code'],
+          'redo_movement_id':mid,'redo_code':code,'reason':reason,'original_line_ids':[r['original_line_id'] for r in reverse]})
+    return {'ok':True,'redo_movement_id':mid,'redo_code':code}
+
+
+@app.get('/api/recovery/movement/{movement_id}')
+def recovery_movement_status(movement_id:int,request:Request):
+    u=get_user(request)
+    if u['role']!='admin':err(403,'Administrator access required')
+    with db(readonly=True) as c:
+        movement=c.execute('SELECT id,code,kind,route FROM movements WHERE id=?',(movement_id,)).fetchone()
+        if not movement:err(404,'Movement not found')
+        lines=[]
+        for row in c.execute('''SELECT l.id,l.qty,l.direction,b.batch_no,b.expiry_date,b.on_hand,i.name item_name,
+                        i.unit,i.category book_category,
+                        (SELECT COUNT(*) FROM movement_reversals r WHERE r.original_line_id=l.id AND r.redo_line_id IS NULL) active_undo
+                        FROM movement_lines l JOIN batches b ON b.id=l.batch_id
+                        JOIN items i ON i.id=b.item_id WHERE l.movement_id=? ORDER BY l.id''',(movement_id,)):
+            details=dict(row);details['eligible']=not bool(details['active_undo']) and movement['route'] not in ('recovery_undo','recovery_redo')
+            if ('المخدرات' in (details['book_category'] or '') or 'المؤثرات العقلية' in (details['book_category'] or '')) and not is_ultra_admin(u):
+                details['eligible']=False
+            lines.append(details)
+        return {'movement':dict(movement),'lines':lines,'is_ultra_admin':is_ultra_admin(u)}
+
+
+@app.post('/api/recovery/undo')
+async def undo_movement(request:Request):
+    u=get_user(request,require_csrf=True)
+    data=await request.json()
+    with db() as c:
+        reason=recovery_auth(c,u,data,'UNDO')
+        mid=integer(data,'movement_id',1)
+        return recovery_undo(c,u,mid,data.get('line_ids'),reason)
+
+
+@app.post('/api/recovery/redo')
+async def redo_movement(request:Request):
+    u=get_user(request,require_csrf=True)
+    data=await request.json()
+    with db() as c:
+        reason=recovery_auth(c,u,data,'REDO',owner=True)
+        mid=integer(data,'undo_movement_id',1)
+        return recovery_redo(c,u,mid,reason)
+
+
+RECOVER_EDIT_FIELDS={
+    'ITEM_UPDATED':('items',('sku','name','category','branch','unit','generic_name','trade_name','initial_batch_no',
+                           'manufacturer','manufacture_date','expiry_date','information','price_fils','annual_need','active')),
+    'DEPARTMENT_UPDATED':('departments',('name','active')),
+    'USER_UPDATED':('users',('role','branch','is_active')),
+}
+
+
+def audit_edit_reapply(c,user,original_audit_id,*,redo,reason):
+    source=c.execute('SELECT * FROM audit_log WHERE id=?',(original_audit_id,)).fetchone()
+    if not source or source['action'] not in RECOVER_EDIT_FIELDS:
+        err(409,'This audit event is not eligible for field-level recovery')
+    detail=json.loads(source['detail'])
+    before,after=detail.get('before'),detail.get('after')
+    if not isinstance(before,dict) or not isinstance(after,dict):
+        err(409,'Older audit records have no trustworthy before/after snapshot; cannot reverse')
+    table,keys=RECOVER_EDIT_FIELDS[source['action']]
+    if any(k not in before or k not in after for k in keys):
+        err(409,'Audit snapshots are incomplete')
+    oid=int(detail['id'])
+    tracked=c.execute('SELECT * FROM audit_field_reversals WHERE original_audit_id=?',(original_audit_id,)).fetchone()
+    if redo:
+        if not tracked or tracked['redo_audit_id'] is not None:err(409,'No active audit edit Undo to redo')
+        expected,values=before,after
+    else:
+        if tracked:err(409,'This audit edit has already been undone; check its recovery events')
+        expected,values=after,before
+    row=c.execute(f'SELECT * FROM {table} WHERE id=?',(oid,)).fetchone()
+    if not row:err(409,'The target record no longer exists')
+    if any(row[k]!=expected[k] for k in keys):
+        err(409,'The record has changed since this audit event; automatic recovery would overwrite newer edits')
+    if table=='users':
+        if row['username'].lower()==OWNER_USERNAME:err(403,'The installation owner cannot be changed through audit recovery')
+        if row['role']=='admin' and (values['role']!='admin' or not values['is_active']):
+            count=c.execute("SELECT COUNT(*) n FROM users WHERE role='admin' AND is_active=1").fetchone()['n']
+            if count<=1:err(409,'Cannot remove the last active administrator')
+        # Every branch or role change invalidates current sessions.
+        c.execute('DELETE FROM sessions WHERE user_id=?',(oid,))
+    if table=='items' and (values['branch']!=row['branch'] or values['unit']!=row['unit']):
+        dependent=c.execute('SELECT 1 FROM movement_lines ml JOIN batches b ON b.id=ml.batch_id WHERE b.item_id=? LIMIT 1',(oid,)).fetchone()
+        if dependent:err(409,'Cannot change branch or unit of an item with recorded movements')
+    set_clause=','.join(k+'=?' for k in keys)
+    try:
+        c.execute(f'UPDATE {table} SET {set_clause} WHERE id=?', tuple(values[k] for k in keys)+(oid,))
+    except sqlite3.IntegrityError:
+        err(409,'Recovery conflicts with existing record constraints or names')
+    new_event='AUDIT_EDIT_REDO' if redo else 'AUDIT_EDIT_UNDO'
+    audit(c,user['id'],new_event,{'source_audit_id':original_audit_id,'source_action':source['action'],
+                                 'object_type':table,'object_id':oid,'reason':reason,'before':expected,'after':values})
+    event_id=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+    if redo:
+        c.execute('UPDATE audit_field_reversals SET redo_audit_id=? WHERE id=?',(event_id,tracked['id']))
+    else:
+        c.execute('INSERT INTO audit_field_reversals(original_audit_id,undo_audit_id,object_type,object_id) VALUES(?,?,?,?)',
+                  (original_audit_id,event_id,table,oid))
+    return {'ok':True,'audit_event_id':event_id,'object_type':table,'object_id':oid}
+
+
+@app.post('/api/recovery/audit/{audit_id}/undo')
+async def undo_audit_event(audit_id:int,request:Request):
+    u=get_user(request,require_csrf=True);data=await request.json()
+    with db() as c:
+        reason=recovery_auth(c,u,data,'UNDO',owner=True)
+        original=c.execute('SELECT * FROM audit_log WHERE id=?',(audit_id,)).fetchone()
+        if not original:err(404,'Audit event not found')
+        if original['action'] in ('MOVEMENT_CREATED','OPENING_BALANCE_CREATED'):
+            details=json.loads(original['detail']);movement_id=details.get('id') if original['action']=='MOVEMENT_CREATED' else details.get('movement_id')
+            if not movement_id:err(409,'Audit entry has no linked shipment')
+            return recovery_undo(c,u,int(movement_id),data.get('line_ids'),reason,audit_source=audit_id)
+        return audit_edit_reapply(c,u,audit_id,redo=False,reason=reason)
+
+
+@app.post('/api/recovery/audit/{audit_id}/redo')
+async def redo_audit_edit(audit_id:int,request:Request):
+    u=get_user(request,require_csrf=True);data=await request.json()
+    with db() as c:
+        reason=recovery_auth(c,u,data,'REDO',owner=True)
+        return audit_edit_reapply(c,u,audit_id,redo=True,reason=reason)
+
 
 
 @app.get('/api/health')

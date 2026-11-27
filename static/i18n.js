@@ -29,7 +29,11 @@
     dynamic=s.match(/^Dispatch\/receipt: (.+)$/); if(dynamic)return 'التجهيز / الاستلام: '+dynamic[1];
     dynamic=s.match(/^Google Drive backups \(([\d,]+)\)$/); if(dynamic)return 'نسخ Google Drive الاحتياطية ('+dynamic[1]+')';
     // Compose messages containing database values without translating user-entered data.
-    let m=s.match(/^Welcome back, (.+)$/);
+    let m=s.match(/^Undo recorded shipment · (.+)$/);
+    if(m)return 'التراجع عن حركة مخزنية · '+m[1];
+    m=s.match(/^Recovery saved as a new, permanent audit event\. (.+)$/);
+    if(m)return 'تم حفظ التصحيح بسجل تدقيق دائم جديد · '+m[1];
+    m=s.match(/^Welcome back, (.+)$/);
     if(m)return 'مرحباً بعودتك، '+m[1];
     m=s.match(/^Existing category: (.+) — please choose an approved book for this branch\.$/);
     if(m)return 'التصنيف السابق: '+m[1]+' — يرجى اختيار سجل معتمد لهذا الفرع.';
