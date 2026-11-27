@@ -20,6 +20,7 @@
     if(!s||language==='en')return original;
     if(Object.prototype.hasOwnProperty.call(dict,s))return dict[s];
     let unitMatch=s.match(/^([\d,.]+) (tablet|capsule|bottle|ampoule|vial|tube|suppository|drops|piece|bag|pack|roll|packet|dozen)$/); if(unitMatch)return unitMatch[1]+' '+(dict[unitMatch[2]]||unitMatch[2]);
+    let pages=s.match(/^Showing ([\d,]+)–([\d,]+) of ([\d,]+)$/);if(pages)return `عرض ${pages[1]}–${pages[2]} من أصل ${pages[3]}`;
     let dynamic=s.match(/^([\d,]+) items$/); if(dynamic)return dynamic[1]+' مواد';
     dynamic=s.match(/^([\d,]+) item lines$/); if(dynamic)return dynamic[1]+' سطر مواد';
     dynamic=s.match(/^Opening lot ([\d,]+)$/); if(dynamic)return 'الوجبة '+dynamic[1];

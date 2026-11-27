@@ -1083,5 +1083,10 @@
   "Redone": "أُعيد تطبيقه",
   "Recovery recorded": "تصحيح مسجل",
   "line(s)": "سطر مواد",
-  "Before/after saved": "حُفظت القيم السابقة واللاحقة"
+  "Before/after saved": "حُفظت القيم السابقة واللاحقة",
+  "Rows per page": "عدد الصفوف",
+  "Previous": "السابق",
+  "Next": "التالي",
+  "Page": "صفحة",
+  "Showing": "عرض"
 }

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Changa:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700;800&family=Marhey:wght@500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 :root{--ink:#12334d;--muted:#607f90;--teal:#078f8c;--mint:#12b4a8;--line:#d8e9ee;--cream:#f6fafb;--blue:#e9f7fb;--white:#fff;--shadow:0 16px 42px rgba(31,93,115,.075)}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:96px}body{margin:0;background:#f7fbfd;color:var(--ink);font-family:'DM Sans',Arial,sans-serif;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}button{font:inherit;cursor:pointer}img{max-width:100%}h1,h2,h3,p{margin:0}button:focus-visible,a:focus-visible{outline:3px solid #20aaa6;outline-offset:4px}.marketing-page{overflow-x:hidden}.icon-defs{position:absolute;width:0;height:0;overflow:hidden}.ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;flex:none}.container{max-width:1192px;width:calc(100% - 64px);margin-inline:auto}.section-anchor{scroll-margin-top:82px}
 /* Header */
@@ -63,12 +63,68 @@ html[lang="ar"] .hero h1,html[lang="ar"] .section-heading h2,html[lang="ar"] .wo
 @media(max-width:370px){.hero-art{min-height:340px}.network-shell{height:325px}.network-stage{height:228px}.network-core{width:132px;height:142px}.core-building{height:73px}.network-node{width:105px}.network-node small{font-size:6.5px}}
 @media(prefers-reduced-motion:reduce){.hero:before,.hero:after,.network-grid,.track-flow,.track-dashed,.network-scanline,.network-node,.scene-ambient,.scene-float,.network-foot-pulse i{animation:none!important}.network-shell{transform:none!important;transition:none!important}}
 
-/* V4.25 optional display-font styling. Font binaries are intentionally not distributed.
-   If licensed/owned: place Amine_mod.ttf and banda.ttf in static/fonts/.
-   Until then, modern system Arabic fallbacks remain fully readable. */
-@font-face{font-family:'IMS Amine';src:url('/static/fonts/Amine_mod.ttf') format('truetype');font-weight:700;font-style:normal;font-display:swap}
-@font-face{font-family:'IMS Banda';src:url('/static/fonts/banda.ttf') format('truetype');font-weight:700;font-style:normal;font-display:swap}
-html[lang="ar"] .hero h1,html[lang="ar"] .section-heading h2,html[lang="ar"] .workflow-text h2,html[lang="ar"] .legal-hero h1,html[lang="ar"] .cta-surface h2{font-family:'IMS Amine','Noto Sans Arabic',Tahoma,Arial,sans-serif;letter-spacing:0;line-height:1.65}
-html[lang="ar"] .hero .eyebrow,html[lang="ar"] .section-kicker{font-family:'IMS Banda','IMS Amine',Tahoma,sans-serif;font-size:13px;font-weight:700;letter-spacing:0}
-html[lang="ar"] .feature-card h3,html[lang="ar"] .protection-card h3{font-family:'IMS Amine','Noto Sans Arabic',Tahoma,Arial,sans-serif;line-height:1.7}
-html[lang="ar"] .legal-section p{font-family:'DM Sans',Tahoma,Arial,sans-serif}
+/* V4.25.1 — Arabic typography. Locally owned fonts take precedence; hosted open
+   Arabic display fonts are visible fallbacks so the headings still change when
+   the optional user-supplied .ttf files are not present on the server.
+   Never apply decorative type to data-entry fields or stock tables. */
+@font-face {
+  font-family: 'IMS Amine';
+  src: local('Amine_mod Bold'), local('Aminemod-Bold'), url('/static/fonts/Amine_mod.ttf?v=4251') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IMS Banda';
+  src: local('panda Bold Italic'), local('panda-BoldItalic'), url('/static/fonts/banda.ttf?v=4251') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  --ims-display-ar: 'IMS Amine', 'Changa', 'Cairo', Tahoma, sans-serif;
+  --ims-accent-ar: 'IMS Banda', 'Marhey', 'Changa', 'Cairo', Tahoma, sans-serif;
+}
+/* Larger headings: Amine, with a deliberately distinct Changa fallback. */
+html[lang="ar"] .hero h1,
+html[lang="ar"] .section-heading h2,
+html[lang="ar"] .workflow-text h2,
+html[lang="ar"] .legal-hero h1,
+html[lang="ar"] .cta-surface h2 {
+  font-family: var(--ims-display-ar);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+/* Short label typography: panda/Banda; keep its footprint small. */
+html[lang="ar"] .hero .eyebrow,
+html[lang="ar"] .section-kicker {
+  font-family: var(--ims-accent-ar);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0;
+  line-height: 1.85;
+}
+/* Readable hierarchy for feature cards and important sectional headings. */
+html[lang="ar"] .feature-card h3,
+html[lang="ar"] .protection-card h3,
+html[lang="ar"] .legal-section h2,
+html[lang="ar"] .step strong {
+  font-family: 'Changa', 'Cairo', Tahoma, Arial, sans-serif;
+  font-weight: 700;
+  line-height: 1.7;
+}
+/* Body paragraphs and labels should remain practical, not decorative. */
+html[lang="ar"] .hero-intro,
+html[lang="ar"] .feature-card p,
+html[lang="ar"] .section-desc,
+html[lang="ar"] .legal-section p {
+  font-family: 'Cairo', 'Tajawal', Tahoma, Arial, sans-serif;
+}
+@media(max-width:620px) {
+  html[lang="ar"] .hero h1 { font-size: clamp(32px, 8.6vw, 42px); line-height: 1.65; }
+  html[lang="ar"] .section-heading h2,
+  html[lang="ar"] .workflow-text h2 { line-height: 1.55; }
+  html[lang="ar"] .hero .eyebrow,
+  html[lang="ar"] .section-kicker { font-size: 11px; }
+}

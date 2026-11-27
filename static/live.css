@@ -352,3 +352,28 @@ body.column-dialog-open{overflow:hidden}
 .recovery-line small{font-size:11px;color:#6c8999;line-height:1.7}
 #recoveryForm textarea{min-height:96px;resize:vertical}
 @media(max-width:650px){.modal-body:has(#recoveryForm){width:100%}.recovery-line{align-items:flex-start}}
+
+/* V4.26 — recovery actions use non-operational colors, distinct from stock movement labels. */
+.pill.recovery-undo, .recovery-undo-btn {
+ background:#f0eaff!important;color:#6544a4!important;border:1px solid #cfb9f4!important;
+}
+.pill.recovery-redo, .recovery-redo-btn {
+ background:#fff0e6!important;color:#a25032!important;border:1px solid #f1c4a8!important;
+}
+.recovery-undo-btn,.recovery-redo-btn{font-weight:750;transition:background .15s, box-shadow .15s}
+.recovery-undo-btn:hover,.recovery-undo-btn:focus-visible{background:#e4d7fc!important;box-shadow:0 0 0 2px #d4bef5}
+.recovery-redo-btn:hover,.recovery-redo-btn:focus-visible{background:#fbe0cf!important;box-shadow:0 0 0 2px #f1c4a8}
+/* Light, compact pagination outside scrollable table so no horizontal clipping. */
+.list-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px 18px;flex-wrap:wrap;margin-top:13px;padding:13px 14px;background:#f5fafb;border:1px solid #d9eaed;border-radius:12px;color:#385d6d;font-size:12px}
+.pager-count{font-weight:700;white-space:nowrap}
+.pager-size-label{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.pager-size{min-width:75px!important;width:75px!important;max-width:75px!important;padding:7px 8px!important;height:35px!important;font-size:12px!important}
+.pager-buttons{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pager-number,.pager-nav{border:1px solid #c9e4e8;background:white;color:#236477;border-radius:8px;font-family:inherit;font-size:12px;font-weight:750;min-width:34px;height:34px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+.pager-number.active{background:#dff5f3;color:#087d7a;border-color:#2bb1aa}
+.pager-number:hover:not(:disabled),.pager-nav:hover:not(:disabled){background:#ebf8f9;border-color:#86cdd0}
+.pager-number:focus-visible,.pager-nav:focus-visible,.pager-size:focus-visible{outline:2px solid #36b9b0;outline-offset:2px}
+.pager-number:disabled,.pager-nav:disabled{opacity:.43;cursor:not-allowed}
+.pager-ellipsis{padding:0 3px;color:#7c9ea6}
+@media(max-width:800px){.list-pagination{justify-content:center}.pager-count{flex:1 0 100%;text-align:center}.pager-size-label{flex:1 1 100%;justify-content:center}.pager-buttons{justify-content:center}}
+@media(max-width:450px){.pager-number,.pager-nav{min-width:29px;height:32px;padding:4px 7px}.pager-buttons{gap:3px}}

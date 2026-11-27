@@ -1,6 +1,12 @@
+## V4.26 update
+
+Redeploy the **same** Railway application using this ZIP. Keep the existing `/data` volume and variables unchanged; export a backup first. Verify `/api/health` reports `"release":"4.26.0"` and `"version":10`. No schema migration is required.
+
+**Current release: V4.25.1** — Arabic headline typography/cache-busting fix. See `FONT_FIX_V4_25_1.md`; database Schema V10 unchanged.
+
 ## Current release: V4.25 — Controlled Undo/Redo
 
-See **V4_25_CHANGES.md**. This is an additive migration to **Schema V10**, with selective shipment Undo, Ultra Admin Redo and eligible audit-edit recovery, plus neutral legal pages and optional supplied-font styling. **Back up first, redeploy the same Railway service, and keep `/data` attached. Do not restore a database as part of an ordinary code update.** Verify `/api/health` reports `release: 4.25.0`, `version: 10`.
+See **V4_25_CHANGES.md**. This is an additive migration to **Schema V10**, with selective shipment Undo, Ultra Admin Redo and eligible audit-edit recovery, plus neutral legal pages and optional supplied-font styling. **Back up first, redeploy the same Railway service, and keep `/data` attached. Do not restore a database as part of an ordinary code update.** Verify `/api/health` reports `release: 4.25.1`, `version: 10`.
 
 ## V4.20 update
 

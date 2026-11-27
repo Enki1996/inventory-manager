@@ -1,6 +1,17 @@
+## V4.26 — List Pagination and Recovery Colors
+
+- Paginated inventory, item movements, departments, staff accounts, movement register, audit log, and reports. Page sizes: 20 / 50 / 100.
+- Movement and audit logs now page through the complete database, not only the most recent 500 / 300 records.
+- Item and department shipment histories and per-item movement ledgers use pagination.
+- **المواقف** reports deliberately remain unpaginated.
+- Undo is lavender; Redo is peach/terracotta, without changing stock receipt/dispatch colors.
+- Database Schema V10 unchanged. No restore required.
+
+**Current release: V4.25.1** — Arabic headline typography/cache-busting fix. See `FONT_FIX_V4_25_1.md`; database Schema V10 unchanged.
+
 ## Current release: V4.25 — Controlled Undo/Redo
 
-See **V4_25_CHANGES.md**. This is an additive migration to **Schema V10**, with selective shipment Undo, Ultra Admin Redo and eligible audit-edit recovery, plus neutral legal pages and optional supplied-font styling. **Back up first, redeploy the same Railway service, and keep `/data` attached. Do not restore a database as part of an ordinary code update.** Verify `/api/health` reports `release: 4.25.0`, `version: 10`.
+See **V4_25_CHANGES.md**. This is an additive migration to **Schema V10**, with selective shipment Undo, Ultra Admin Redo and eligible audit-edit recovery, plus neutral legal pages and optional supplied-font styling. **Back up first, redeploy the same Railway service, and keep `/data` attached. Do not restore a database as part of an ordinary code update.** Verify `/api/health` reports `release: 4.25.1`, `version: 10`.
 
 ## V4.20 update
 

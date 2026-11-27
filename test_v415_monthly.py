@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 with tempfile.TemporaryDirectory() as workspace:
     os.environ['WAREHOUSE_DATA_DIR'] = workspace
     from app import app, APP_RELEASE, SCHEMA_VERSION
-    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.25.0', 10)
+    assert (APP_RELEASE, SCHEMA_VERSION) == ('4.26.0', 10)
     future = (dt.datetime.now(ZoneInfo('Asia/Baghdad')).date() + dt.timedelta(days=340)).isoformat()
     expired = (dt.datetime.now(ZoneInfo('Asia/Baghdad')).date() - dt.timedelta(days=1)).isoformat()
     with TestClient(app) as c:
@@ -67,5 +67,5 @@ with tempfile.TemporaryDirectory() as workspace:
         assert ok(c.get('/api/positions'))['scarce_pct']=='20', 'Custom filters must not change defaults on server'
         assert c.get('/api/positions?scarce_pct=0').status_code==422
         assert c.get('/api/positions?surplus_pct=1001').status_code==422
-        assert ok(c.get('/api/health'))['release']=='4.25.0'
+        assert ok(c.get('/api/health'))['release']=='4.26.0'
         print('PASS V4.15: defaults, custom %, exact 20/120 boundaries, fractional monthly need, expired vs usable, missing yearly need, release')

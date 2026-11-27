@@ -1,4 +1,4 @@
-/* V4.25 controlled recovery UI; originals remain auditable. */
+/* V4.26 paginated warehouse lists + distinct recovery colors. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -15,6 +15,38 @@ const msg = (title,sub='')=>`<div class="empty-state">${I('package')}<strong>${E
 let user=null, csrf='', view='', cache={items:[],departments:[],batches:[],movements:[],users:[],dashboard:null,positions:null,books:{},units:{},staff:[]}, toastTimer;
 let inlineNewItem=null; // Pending shipment line; kept intact while the item modal is open.
 const DEFAULT_SCARCE_PERCENT='20', DEFAULT_SURPLUS_PERCENT='120';
+// V4.26 — pagination. Each list keeps its own page and page size.
+// Warehouse Statements (المواقف) intentionally bypass pagination.
+const PAGE_SIZES=[20,50,100];
+const pageStates=Object.fromEntries(['inventory','departments','item_movement','movements','users','audit','reports'].map(k=>[k,{page:1,size:20}]));
+function pageState(key){return pageStates[key]||(pageStates[key]={page:1,size:20});}
+function resetPage(key){pageState(key).page=1;}
+function pagedData(key,items){
+ const state=pageState(key),total=items.length;
+ const pages=Math.max(1,Math.ceil(total/state.size));state.page=Math.min(Math.max(state.page,1),pages);
+ const start=(state.page-1)*state.size;
+ return {rows:items.slice(start,start+state.size),start,total,pages};
+}
+function pager(key,total){
+ const st=pageState(key),count=Math.max(1,Math.ceil(total/st.size));st.page=Math.min(Math.max(1,st.page),count);
+ const first=total?(st.page-1)*st.size+1:0,last=Math.min(total,st.page*st.size);
+ const candidates=[1,count,st.page-2,st.page-1,st.page,st.page+1,st.page+2].filter(p=>p>=1&&p<=count).sort((a,b)=>a-b);
+ const pages=[...new Set(candidates)].map((p,i,all)=>`${i&&p-all[i-1]>1?'<span class="pager-ellipsis" aria-hidden="true">…</span>':''}<button type="button" class="pager-number ${p===st.page?'active':''}" data-pager-key="${key}" data-pager-page="${p}" aria-label="Page ${p}" ${p===st.page?'aria-current="page"':''}>${N(p)}</button>`).join('');
+ return `<nav class="list-pagination" data-list-pager="${key}" aria-label="${E(key)} pages"><span class="pager-count">Showing ${N(first)}–${N(last)} of ${N(total)}</span><label class="pager-size-label">Rows per page <select class="db-select pager-size" aria-label="Rows per page" data-pager-size="${key}">${PAGE_SIZES.map(n=>`<option value="${n}" ${n===st.size?'selected':''}>${n}</option>`).join('')}</select></label><div class="pager-buttons"><button type="button" class="pager-nav" data-pager-key="${key}" data-pager-page="${st.page-1}" ${st.page===1?'disabled':''} aria-label="Previous page">‹ <span>Previous</span></button>${pages}<button type="button" class="pager-nav" data-pager-key="${key}" data-pager-page="${st.page+1}" ${st.page===count?'disabled':''} aria-label="Next page"><span>Next</span> ›</button></div></nav>`;
+}
+function pagedTable(key,records,cols,makeRows){const p=pagedData(key,records);return table(cols,makeRows(p.rows,p.start))+pager(key,p.total);}
+function refreshPagedView(key){
+ if(key==='inventory')filterInventory();
+ else if(key==='departments')filterDepartmentTable();
+ else if(key==='item_movement')filterItemMovements();
+ else if(key==='movements')loadMovementPage();
+ else if(key==='users'){const target=$('#dashboardView');if(target)target.innerHTML=users();window.HWLang?.apply();}
+ else if(key==='audit')loadAudit();
+ else if(key==='shipment_history')loadShipmentHistory();
+ else if(key.startsWith('item_history_')){const id=Number(key.split('_').at(-1));if(id)loadItemHistory(id);}
+ else if(key==='reports'){const target=$('#dashboardView');if(target)target.innerHTML=reports();window.HWLang?.apply();}
+}
+
 let statementExpiryBefore='', statementScarcePct=DEFAULT_SCARCE_PERCENT, statementSurplusPct=DEFAULT_SURPLUS_PERCENT;
 // V4.13: filters and selected table columns are presentation-only. Data is unchanged.
 const expandedItems=new Set();
@@ -161,29 +193,30 @@ function fullItemPanel(it,stat){
    <div data-item-history="${it.id}"><button type="button" class="db-btn secondary small" data-load-item-history="${it.id}" data-history-offset="0">Load movement history</button></div>
  </div></div>`;
 }
-function detailsTable(items,section,contexts={}){
+function detailsTable(items,section,contexts={},startIndex=0){
  const chosen=allowedColumns(section).filter(k=>k==='name'||columnShown[section].includes(k));
  const columns=['#',''].concat(chosen.map(headerFor));
  const rows=[];
  for(const [i,it] of items.entries()){
   const stat=lotStats(it),id=it.id,open=expandedItems.has(id),ctx=contexts[id]||{};
   const arrow=stat.lots.length>1?`<button type="button" class="expand-row-btn" data-expand-item="${id}" aria-expanded="${open}" aria-label="Expand stored lots" title="Expand stored lots">${open?'▴':'▾'}</button>`:'';
-  rows.push(`<tr class="product-summary"><td><span class="item-row-number">${N(i+1)}</span></td><td class="item-expand-cell">${arrow}</td>${chosen.map(k=>`<td>${itemColumn(it,stat,k,ctx)}</td>`).join('')}</tr>`);
+  rows.push(`<tr class="product-summary"><td><span class="item-row-number">${N(startIndex+i+1)}</span></td><td class="item-expand-cell">${arrow}</td>${chosen.map(k=>`<td>${itemColumn(it,stat,k,ctx)}</td>`).join('')}</tr>`);
   rows.push(`<tr class="product-detail-row" data-detail-row="${id}" ${open?'':'hidden'}><td colspan="${columns.length}">${open?fullItemPanel(it,stat):''}</td></tr>`);
  }
  return rows.length?table(columns,rows):msg('No matching items','Try changing the stock status or filters.');
 }
-async function loadItemHistory(itemId,offset=0){
+async function loadItemHistory(itemId){
  const holder=document.querySelector(`[data-item-history="${itemId}"]`);if(!holder)return;
+ const state=pageState('item_history_'+itemId),offset=(state.page-1)*state.size;
  const btn=holder.querySelector('[data-load-item-history]');if(btn){btn.disabled=true;btn.textContent='Loading…';}
  try{
-  const result=await api(`/api/items/${itemId}/history?limit=50&offset=${offset}`);
-  const rows=result.rows.map(m=>`<tr><td>${D(m.created_at)}</td><td><strong>${E(m.code)}</strong><div class="tiny">${E(movementLabel(m))} · ${E(routeNames[m.route]||m.route)}</div></td><td>${E(m.paper_ref||'—')}${m.dispatch_ref?`<div class="tiny">${E(m.dispatch_ref)}</div>`:''}</td><td>${E(m.batch_no)}</td><td>${E(m.expiry_date||'—')}</td><td>${m.direction>0?'+':'−'}${N(m.qty)}</td><td>${priceLabel(m.unit_price_fils)}</td><td>${E(m.operator)}</td></tr>`);
-  if(offset===0){holder.innerHTML=`<p class="muted-hint">${N(result.total)} recorded line(s)</p><div class="db-table-wrap"><table class="db-table history-table"><thead><tr>${['Date','Movement','Document','Batch','Expiry','Quantity','Price','By'].map(x=>`<th>${E(x)}</th>`).join('')}</tr></thead><tbody data-history-body>${rows.join('')}</tbody></table></div>`;}
-  else holder.querySelector('[data-history-body]')?.insertAdjacentHTML('beforeend',rows.join(''));
+  const result=await api(`/api/items/${itemId}/history?limit=${state.size}&offset=${offset}`);
+  if(!document.body.contains(holder))return;
+  const pages=Math.max(1,Math.ceil(result.total/state.size));
+  if(state.page>pages){state.page=pages;return loadItemHistory(itemId);}
   if(result.total===0){holder.innerHTML=msg('No movements yet','Creating an item does not add warehouse stock.');return;}
-  const next=offset+rows.length;
-  if(next<result.total)holder.insertAdjacentHTML('beforeend',`<button type="button" class="db-btn secondary small history-more" data-load-item-history="${itemId}" data-history-offset="${next}">Load more (${N(result.total-next)} remaining)</button>`);
+  const rows=result.rows.map(m=>`<tr><td>${D(m.created_at)}</td><td><strong>${E(m.code)}</strong><div class="tiny">${E(movementLabel(m))} · ${E(routeNames[m.route]||m.route)}</div></td><td>${E(m.paper_ref||'—')}${m.dispatch_ref?`<div class="tiny">${E(m.dispatch_ref)}</div>`:''}</td><td>${E(m.batch_no)}</td><td>${E(m.expiry_date||'—')}</td><td>${m.direction>0?'+':'−'}${N(m.qty)}</td><td>${priceLabel(m.unit_price_fils)}</td><td>${E(m.operator)}</td></tr>`);
+  holder.innerHTML=table(['Date','Movement','Document','Batch','Expiry','Quantity','Price','By'],rows)+pager('item_history_'+itemId,result.total);
   window.HWLang?.apply();
  }catch(e){toast(e.message,'error');if(btn){btn.disabled=false;btn.textContent='Retry history';}}
 }
@@ -349,7 +382,7 @@ function filterInventory(){
   return (a.trade_name||a.name).localeCompare(b.trade_name||b.name);
  };
  matched.sort(compare);
- const results=$('#itemResults');if(results)results.innerHTML=detailsTable(matched,'inventory');
+ const pg=pagedData('inventory',matched);const results=$('#itemResults');if(results)results.innerHTML=detailsTable(pg.rows,'inventory',{},pg.start)+pager('inventory',pg.total);
  const count=$('#inventoryShown');if(count)count.textContent=`${N(matched.length)} of ${N(cache.items.length)} items`;
  window.HWLang?.apply();
 }
@@ -364,8 +397,8 @@ function movementRows(movements){return movements.map(m=>{
  const preview=first?`<div class="movement-line-summary"><strong>${E(first.item_name)}</strong><span class="tiny">${E(first.batch_no)} · ${N(first.qty)} ${E(unitLabel(first.unit))}</span></div>`:'<span class="muted-hint">No lines recorded</span>';
  const countLabel=lines.length===1?'1 item':`${N(lines.length)} items`;
  const recoveryButton=user?.role==='admin'&&m.route!=='recovery_undo'&&m.route!=='recovery_redo'?
-  `<button type="button" class="db-btn secondary small" data-recover-movement="${m.id}" style="margin-top:7px" aria-label="Undo selected items in ${E(m.code)}">Undo / تصحيح</button>`:'';
- return `<tr class="movement-master-row" data-movement-master="${m.id}"><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div>${recoveryButton}</td><td>${badge(movementLabel(m),m.route==='recovery_undo'?'adjustment':m.route==='recovery_redo'?'blue':m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td><div class="movement-lines-cell">${preview}<button type="button" class="movement-expand-btn" data-expand-movement="${m.id}" aria-expanded="false" aria-label="${E('Show all receipt items')}" title="${E('Full receipt details')}"><span class="movement-count-pill">${E(countLabel)}</span><span class="movement-chevron" aria-hidden="true">▾</span></button></div></td><td>${E(m.creator)}</td></tr>`;
+  `<button type="button" class="db-btn secondary small recovery-undo-btn" data-recover-movement="${m.id}" style="margin-top:7px" aria-label="Undo selected items in ${E(m.code)}">Undo / تصحيح</button>`:'';
+ return `<tr class="movement-master-row" data-movement-master="${m.id}"><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div>${recoveryButton}</td><td>${badge(movementLabel(m),m.route==='recovery_undo'?'recovery-undo':m.route==='recovery_redo'?'recovery-redo':m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td><div class="movement-lines-cell">${preview}<button type="button" class="movement-expand-btn" data-expand-movement="${m.id}" aria-expanded="false" aria-label="${E('Show all receipt items')}" title="${E('Full receipt details')}"><span class="movement-count-pill">${E(countLabel)}</span><span class="movement-chevron" aria-hidden="true">▾</span></button></div></td><td>${E(m.creator)}</td></tr>`;
  });}
 // Expand a document without another database call. The existing /api/movements
 // response already contains every line for each returned receipt/issue.
@@ -383,7 +416,7 @@ function toggleMovementDetails(button){
  if(expanded?.matches(`[data-expanded-movement="${id}"]`)){
   expanded.remove();button.setAttribute('aria-expanded','false');button.querySelector('.movement-chevron').textContent='▾';return;
  }
- const movement=cache.movements.find(m=>m.id===id);if(!movement)return;
+ const movement=displayedMovements.find(m=>m.id===id)||cache.movements.find(m=>m.id===id);if(!movement)return;
  row.insertAdjacentHTML('afterend',movementDetailsRow(movement));
  button.setAttribute('aria-expanded','true');button.querySelector('.movement-chevron').textContent='▴';
  window.HWLang?.apply();
@@ -414,25 +447,22 @@ function inventory(){return `${head('Item inventory','All product details and st
  <label class="include-inactive"><input id="itemIncludeInactive" type="checkbox" ${inventoryInactive?'checked':''}> Include inactive products</label>
  ${columnPicker('inventory')}<span class="muted-hint" id="inventoryShown"></span>
  </div><div id="itemResults"></div>`,'package')}`}
-function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments))}</div>`,'building')}`}
-function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=table(['Department','Last shipment','Shipments','Status','Actions'],departmentRows(cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q))));}
+function departments(){return `${head('Hospital departments','The approved departments are preloaded once. You can add more, rename them or deactivate them without changing movement history.',can('department_write')?`<button class="db-btn" data-new="dept">${I('building')} Add department</button>`:'')}${panel('Saved departments',`<div class="db-toolbar">${inp('dept_filter','Search departments...','search','id="departmentFilter"')}<span class="muted-hint">${cache.departments.filter(d=>d.active).length} active departments</span></div><div id="departmentResults">${pagedTable('departments',cache.departments,['Department','Last shipment','Shipments','Status','Actions'],departmentRows)}</div>`,'building')}`}
+function filterDepartmentTable(){const input=$('#departmentFilter'),results=$('#departmentResults');if(!input||!results)return;const q=normalizeItemSearch(input.value);results.innerHTML=pagedTable('departments',cache.departments.filter(d=>normalizeItemSearch(d.name).includes(q)),['Department','Last shipment','Shipments','Status','Actions'],departmentRows);window.HWLang?.apply();}
 
 // V4.18: dedicated item and department shipment timelines.
 function itemMovements(){
- const rows=cache.items.map((it,i)=>{
-  const stat=lotStats(it);
-  return `<tr data-item-movement-row><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(unitLabel(it.unit))}</td><td>${N(stat.lots.length)}</td><td><button type="button" class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
- });
  return `${head('Item movements','Choose any registered item to inspect every incoming, outgoing, opening-balance, return and adjustment document it appeared in.')}
- ${panel('All registered items',`<div class="db-toolbar">${inp('item-movement-search','Search item, scientific name, batch or alias...','search','id="itemMovementSearch"')}</div><div id="itemMovementResults">${table(['#','Product','Branch','Register book','Stock','Lots','Movement history'],rows)}</div>`,'history')}`;
+ ${panel('All registered items',`<div class="db-toolbar">${inp('item-movement-search','Search item, scientific name, batch or alias...','search','id="itemMovementSearch"')}</div><div id="itemMovementResults"></div>`,'history')}`;
 }
 function filterItemMovements(){
  const q=normalizeItemSearch($('#itemMovementSearch')?.value||'');
- const rows=cache.items.filter(it=>!q||rowSearchText(it).includes(q)).map((it,i)=>{
+ const matched=cache.items.filter(it=>!q||rowSearchText(it).includes(q));
+ const rows=(items,start)=>items.map((it,i)=>{
   const stat=lotStats(it);
-  return `<tr><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(unitLabel(it.unit))}</td><td>${N(stat.lots.length)}</td><td><button class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
+  return `<tr><td><span class="item-row-number">${N(start+i+1)}</span></td><td><strong>${E(it.trade_name||it.name)}</strong><div class="tiny">${E(it.name)} · ${E(it.sku)}</div></td><td>${E(branchName(it.branch))}</td><td>${E(it.category)}</td><td>${N(stat.physical)} ${E(unitLabel(it.unit))}</td><td>${N(stat.lots.length)}</td><td><button class="db-btn secondary small" data-open-item-shipments="${it.id}">Track movements</button></td></tr>`;
  });
- const root=$('#itemMovementResults');if(root)root.innerHTML=table(['#','Product','Branch','Register book','Stock','Lots','Movement history'],rows);
+ const root=$('#itemMovementResults');if(root)root.innerHTML=pagedTable('item_movement',matched,['#','Product','Branch','Register book','Stock','Lots','Movement history'],rows);
  window.HWLang?.apply();
 }
 let shipmentHistoryScope=null;
@@ -441,12 +471,12 @@ async function openShipmentHistory(type,id){
  const obj=type==='item'?cache.items.find(x=>x.id===id):cache.departments.find(x=>x.id===id);
  if(!obj)return;
  const name=type==='item'?(obj.trade_name||obj.name):obj.name;
- shipmentHistoryScope={type,id};
+ shipmentHistoryScope={type,id};resetPage('shipment_history');
  const modal=$('#movementDetailModal');
  modal.innerHTML=`<section class="shipment-history-dialog" role="dialog" aria-modal="true" aria-label="Recorded shipment history" tabindex="-1"><header class="shipment-history-header"><div><small>${type==='item'?'Item movements':'Department movements'}</small><h2>${E(name)}</h2><p>All recorded shipments, newest first. Every shipment includes document references and its full stock-line details.</p></div><button type="button" class="db-btn secondary small" data-close-shipment-history>Close ×</button></header><div class="shipment-history-scroll" id="shipmentHistoryContent">${msg('Loading shipment history...')}</div><footer class="shipment-history-footer"><span>Read-only records — stock quantities are not changed here.</span></footer></section>`;
  modal.classList.add('open');modal.setAttribute('aria-hidden','false');window.HWLang?.apply();
  modal.querySelector('[data-close-shipment-history]')?.focus();
- await loadShipmentHistory(0);
+ await loadShipmentHistory();
 }
 function shipmentCard(m,scope){
  const route=routeNames[m.route]||m.route||'—';
@@ -457,22 +487,19 @@ function shipmentCard(m,scope){
  const lines=(m.lines||[]).map((l,i)=>`<tr class="${scope.type==='item'&&l.item_id===scope.id?'selected-shipment-line':''}"><td><span class="item-row-number">${N(i+1)}</span></td><td>${E(l.trade_name||l.item_name)}<div class="tiny">${E(l.sku)}</div></td><td>${E(l.batch_no)}<div class="tiny">Lot ${N(l.lot_id)}</div></td><td>${E(l.manufacture_date||'—')}</td><td>${E(l.expiry_date||'—')}</td><td>${l.direction>0?'+':'−'}${N(l.qty)} ${E(unitLabel(l.unit))}</td><td>${priceLabel(l.unit_price_fils)}</td></tr>`);
  return `<article class="shipment-history-card"><div class="shipment-history-title"><div><strong>${E(m.code)}</strong><span class="tiny">${D(m.created_at)}</span></div>${badge(m.route==='opening_balance'?'Opening balance':direction?'Stock receipt voucher':'Stock issue voucher',color)}</div><div class="shipment-meta">${documents.map(([k,v])=>`<div><span>${E(k)}</span><strong>${E(v)}</strong></div>`).join('')}${m.paperwork_pending?'<div class="pending-paperwork">Emergency documents pending</div>':''}</div><div class="db-table-wrap">${table(['#','Product','Lot','Manufacture','Expiry','Quantity','Unit price'],lines)}</div>${m.notes?`<p class="shipment-notes">${E(m.notes)}</p>`:''}</article>`;
 }
-async function loadShipmentHistory(offset=0){
+async function loadShipmentHistory(){
  const state=shipmentHistoryScope,el=$('#shipmentHistoryContent');if(!state||!el)return;
- const btn=el.querySelector('[data-more-shipments]');if(btn){btn.disabled=true;btn.textContent='Loading…';}
+ const page=pageState('shipment_history'),offset=(page.page-1)*page.size;
  try{
   const path=state.type==='item'?`/api/items/${state.id}/shipments`:`/api/departments/${state.id}/shipments`;
-  const data=await api(`${path}?limit=25&offset=${offset}`);
+  const data=await api(`${path}?limit=${page.size}&offset=${offset}`);
   if(!shipmentHistoryScope||shipmentHistoryScope.id!==state.id||shipmentHistoryScope.type!==state.type)return;
-  if(offset===0)el.innerHTML=`<div class="shipment-counter">${N(data.total)} recorded shipment(s)</div><div id="shipmentCards"></div>`;
-  el.querySelector('[data-more-shipments]')?.remove();
-  const cards=el.querySelector('#shipmentCards');
-  cards?.insertAdjacentHTML('beforeend',data.shipments.map(m=>shipmentCard(m,state)).join(''));
-  if(!data.total)el.innerHTML=msg('No shipments yet','This item or department has no recorded stock movements.');
-  const next=offset+data.shipments.length;
-  if(next<data.total)el.insertAdjacentHTML('beforeend',`<button type="button" class="db-btn secondary" data-more-shipments="${next}">Show more (${N(data.total-next)} remaining)</button>`);
+  const pages=Math.max(1,Math.ceil(data.total/page.size));
+  if(page.page>pages){page.page=pages;return loadShipmentHistory();}
+  if(!data.total){el.innerHTML=msg('No shipments yet','This item or department has no recorded stock movements.');return;}
+  el.innerHTML=`<div class="shipment-counter">${N(data.total)} recorded shipment(s)</div><div id="shipmentCards">${data.shipments.map(m=>shipmentCard(m,state)).join('')}</div>${pager('shipment_history',data.total)}`;
   window.HWLang?.apply();
- }catch(err){toast(err.message,'error');if(btn){btn.disabled=false;btn.textContent='Retry'}}
+ }catch(err){toast(err.message,'error');el.innerHTML=msg('Unable to load history',err.message);}
 }
 function profilePage(){
  return `${head('My account','Maintain your own employee contact information. Role, login name and assigned branch remain administrator-controlled.')}
@@ -499,7 +526,22 @@ async function loadProfile(){
 }
 // Old links to #batches redirect to the combined Inventory screen.
 function batches(){return inventory()}
-function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Warehouse intake</option><option value="OUT">Warehouse dispatch</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(cache.movements))}</div>`,'history')}`}
+function movements(){return `${head('Movement history','Every receipt, issue, return and adjustment has a permanent movement ID plus the original document reference.')}${panel('Transaction register',`<div class="db-toolbar">${inp('movement_filter','Search requisition, item or user...','search','id="movementFilter"')}<select class="db-select" id="movementType" style="max-width:180px"><option value="">All types</option><option value="IN">Warehouse intake</option><option value="OUT">Warehouse dispatch</option><option value="RETURN">Returns</option><option value="ADJUST_PLUS">Adjustment (+)</option><option value="ADJUST_MINUS">Adjustment (−)</option></select></div><div id="movementResults">${msg('Loading movements...')}</div>`,'history')}`}
+let movementPageRequest=0,displayedMovements=[];
+async function loadMovementPage(){
+ const root=$('#movementResults');if(!root)return;
+ const state=pageState('movements'),request=++movementPageRequest;
+ const q=$('#movementFilter')?.value.trim()||'',kind=$('#movementType')?.value||'';
+ try{
+  const result=await api(`/api/movements-page?${new URLSearchParams({limit:String(state.size),offset:String((state.page-1)*state.size),q,kind})}`);
+  if(request!==movementPageRequest||!document.body.contains(root))return;
+  const max=Math.max(1,Math.ceil(result.total/state.size));
+  if(state.page>max){state.page=max;return loadMovementPage();}
+  displayedMovements=result.rows;
+  root.innerHTML=table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(result.rows))+pager('movements',result.total);
+  window.HWLang?.apply();
+ }catch(err){if(request===movementPageRequest&&document.body.contains(root))root.innerHTML=msg('Unable to load movements',err.message);}
+}
 // In shipment menus, an authorized item editor can create a missing catalog item without leaving the draft.
 const inlineItemButton = mode => can('item_write') && (user.role==='admin'||user.branch)
  ? `<button type="button" class="db-btn secondary small inline-item-button" data-inline-item="${mode}">+ Register item not in list</button>` : '';
@@ -738,8 +780,11 @@ function syncOutgoingDestination(form){
 
 function returns(){return `${head('Stock adjustments','Department returns are recorded only under Stock receipt voucher → Internal department return. This tab is for audited stocktaking corrections.')}
 ${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):msg('Read-only','Only managers and administrators with branch permissions can adjust stock.')}`}
-function users(){if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');const rows=cache.users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.is_ultra_admin?'Ultra administrator':x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">Details</button></td><td>${x.id!==user.id&&!x.is_ultra_admin?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:x.is_ultra_admin?'Protected owner account':'Current account'}</td></tr>`);
-return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',table(['Username / name','Role','Assigned branch','Status','Profile details','Actions'],rows),'users')}`}
+function users(){
+ if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');
+ const rows=users=>users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.is_ultra_admin?'Ultra administrator':x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">Details</button></td><td>${x.id!==user.id&&!x.is_ultra_admin?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:x.is_ultra_admin?'Protected owner account':'Current account'}</td></tr>`);
+ return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Warehouse accounts',pagedTable('users',cache.users,['Username / name','Role','Assigned branch','Status','Profile details','Actions'],rows),'users')}`;
+}
 function backup(){return `${head('Database backup and restore','Administrators can export and restore authorized backups. Google Drive is restricted to the ultra administrator.')}
 <div class="db-layout">${panel('Download full backup',`<p class="muted-hint" style="margin-bottom:16px">Includes users, departments, items, batches, requisition references, all movements and audit records. Creates a restorable ZIP with a SQLite snapshot and SHA-256 manifest.</p><button type="button" class="db-btn" id="downloadBackup">${I('download')} Download full database backup</button>`,'backup')}${panel('Restore previously exported backup',`<p class="muted-hint" style="margin-bottom:15px">This replaces ALL current records with the uploaded snapshot. A local safety copy is saved first. Older unsigned backups require the ultra administrator.</p><form id="restoreForm" class="db-form">${field('Upload warehouse backup ZIP',`<input name="backup" type="file" class="db-input" accept=".zip" required>`)}${field('Type RESTORE to confirm',inp('confirmation','RESTORE','text','required autocomplete="off"'))}<button class="db-btn danger" type="submit">${I('upload')} Validate and restore backup</button></form>`,'backup')}</div>
 ${user?.is_ultra_admin?panel('Google Drive — automatic encrypted backups',`<div class="gdrive-backup" id="googleDriveStatus" aria-live="polite"><span class="muted-hint">Checking Google Drive connection…</span></div><div class="gdrive-backup-actions"><button type="button" class="db-btn" id="gdriveConnect">${I('backup')} Connect Google Drive</button><button type="button" class="db-btn secondary" id="gdriveRunNow" disabled>${I('upload')} Back up now</button><button type="button" class="db-btn secondary" id="gdriveRefresh">Refresh status</button><button type="button" class="db-btn secondary" id="gdriveBrowse">Browse Drive backups</button><button type="button" class="db-btn secondary" id="gdriveDisconnect" disabled>Disconnect</button></div><div id="gdriveBackups"></div><div class="db-note">Automatic: 10:00 AM and 2:00 PM Baghdad time, once the Railway Cron service is configured. Google Drive files are encrypted; the decryption key must be stored securely outside Railway too. Restore is manual and ultra-administrator-only.</div>`,'backup'):''}
@@ -748,7 +793,7 @@ ${user?.is_ultra_admin?panel('Google Drive — automatic encrypted backups',`<di
 function reports(){const low=cache.items.filter(x=>x.active&&x.min_stock>0&&x.stock<x.min_stock);const dist=cache.movements.filter(x=>x.kind==='OUT');const total=dist.length;
 return `${head('Warehouse reports','Basic live summaries derived from your saved records. Spreadsheet and PDF reports can be added after we finalize the workflow.')}
 <div class="db-kpis"><div class="db-kpi"><span class="name">${I('package')} Products</span><span class="num">${N(cache.items.length)}</span></div><div class="db-kpi"><span class="name">${I('warning')} Low stock</span><span class="num">${N(low.length)}</span></div><div class="db-kpi"><span class="name">${I('outgoing')} Distribution slips</span><span class="num">${N(total)}</span></div><div class="db-kpi"><span class="name">${I('history')} Total transactions</span><span class="num">${N(cache.movements.length)}</span></div></div>
-${panel('Low-stock products',table(['SKU','Item','Current units','Minimum threshold'],low.map(x=>`<tr><td>${E(x.sku)}</td><td>${E(x.name)}</td><td>${N(x.stock)} ${E(unitLabel(x.unit))}</td><td>${N(x.min_stock)}</td></tr>`)),'warning')}`}
+${panel('Low-stock products',pagedTable('reports',low,['SKU','Item','Current units','Minimum threshold'],items=>items.map(x=>`<tr><td>${E(x.sku)}</td><td>${E(x.name)}</td><td>${N(x.stock)} ${E(unitLabel(x.unit))}</td><td>${N(x.min_stock)}</td></tr>`)),'warning')}`}
 // V4.12 — read-only warehouse statements with editable thresholds and expiry cutoff.
 let statementMode='missing';
 function warehouseStatements(){
@@ -815,7 +860,7 @@ function showPage(next){
  if(next==='batches')next='inventory';
  if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup'))||(next==='settings'&&user.role!=='admin'))next='overview';
  closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
- $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
+ $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='item_movement')filterItemMovements();if(next==='movements')loadMovementPage();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
  if(next==='settings'&&user?.role==='admin')loadAudit();if(next==='profile')loadProfile();if(next==='backup'&&user?.is_ultra_admin)loadGoogleDriveStatus();
  window.scrollTo({top:0,behavior:'instant'});
 }
@@ -1027,17 +1072,17 @@ function auditRecoveryActions(x,events){
  const detailOf=y=>{try{return JSON.parse(y.detail)}catch(_e){return {}}};
  if(x.action==='MOVEMENT_UNDO'&&d.undo_movement_id){
   const already=events.some(y=>y.action==='MOVEMENT_REDO'&&detailOf(y).undo_movement_id===d.undo_movement_id);
-  return already?badge('Redone','blue'):`<button class="db-btn secondary small" data-recovery-redo="${Number(d.undo_movement_id)}">Redo / إعادة</button>`;
+  return already?badge('Redone','recovery-redo'):`<button class="db-btn secondary small recovery-redo-btn" data-recovery-redo="${Number(d.undo_movement_id)}">Redo / إعادة</button>`;
  }
  if(x.action==='AUDIT_EDIT_UNDO'&&d.source_audit_id){
   const already=events.some(y=>y.action==='AUDIT_EDIT_REDO'&&detailOf(y).source_audit_id===d.source_audit_id);
-  return already?badge('Redone','blue'):`<button class="db-btn secondary small" data-recovery-audit-redo="${Number(d.source_audit_id)}">Redo edit</button>`;
+  return already?badge('Redone','recovery-redo'):`<button class="db-btn secondary small recovery-redo-btn" data-recovery-audit-redo="${Number(d.source_audit_id)}">Redo edit</button>`;
  }
- if(x.action==='MOVEMENT_CREATED'&&d.id)return `<button class="db-btn secondary small" data-recover-movement="${Number(d.id)}" data-source-audit="${x.id}">Undo</button>`;
- if(x.action==='OPENING_BALANCE_CREATED'&&d.movement_id)return `<button class="db-btn secondary small" data-recover-movement="${Number(d.movement_id)}" data-source-audit="${x.id}">Undo</button>`;
+ if(x.action==='MOVEMENT_CREATED'&&d.id)return `<button class="db-btn secondary small recovery-undo-btn" data-recover-movement="${Number(d.id)}" data-source-audit="${x.id}">Undo</button>`;
+ if(x.action==='OPENING_BALANCE_CREATED'&&d.movement_id)return `<button class="db-btn secondary small recovery-undo-btn" data-recover-movement="${Number(d.movement_id)}" data-source-audit="${x.id}">Undo</button>`;
  if(['ITEM_UPDATED','DEPARTMENT_UPDATED','USER_UPDATED'].includes(x.action)&&d.before&&d.after){
   const undone=events.some(y=>y.action==='AUDIT_EDIT_UNDO'&&detailOf(y).source_audit_id===x.id);
-  return undone?badge('Recovery recorded','blue'):`<button class="db-btn secondary small" data-recovery-audit-edit="${x.id}">Undo edit</button>`;
+  return undone?badge('Recovery recorded','recovery-undo'):`<button class="db-btn secondary small recovery-undo-btn" data-recovery-audit-edit="${x.id}">Undo edit</button>`;
  }
  return '<span class="muted-hint">—</span>';
 }
@@ -1052,11 +1097,20 @@ function auditEventSummary(x){
  if(['ITEM_UPDATED','DEPARTMENT_UPDATED','USER_UPDATED'].includes(label))return `<strong>#${E(d.id||'')} · ${E(d.name||d.sku||'Edited record')}</strong><div class="tiny">${E(d.branch||d.role||'')} ${d.before&&d.after?'· Before/after saved':''}</div>`;
  return `<span class="tiny">${E(x.detail).slice(0,200)}</span>`;
 }
-async function loadAudit(){try{
- const a=await api('/api/audit');if(view!=='settings')return;
- $('#auditLog').innerHTML=table(['Date / time','Action','Operator','Detail','Recovery'],a.map(x=>`<tr><td>${D(x.created_at)}</td><td>${E(x.action)}</td><td>${E(x.username||'System')}</td><td>${auditEventSummary(x)}</td><td>${auditRecoveryActions(x,a)}</td></tr>`));
- window.HWLang?.apply();
-}catch(e){if($('#auditLog'))$('#auditLog').textContent=e.message}}
+let auditPageRequest=0;
+async function loadAudit(){
+ const root=$('#auditLog');if(!root)return;
+ const st=pageState('audit'),req=++auditPageRequest;
+ try{
+  const data=await api(`/api/audit-page?limit=${st.size}&offset=${(st.page-1)*st.size}`);
+  if(req!==auditPageRequest||!document.body.contains(root))return;
+  const max=Math.max(1,Math.ceil(data.total/st.size));
+  if(st.page>max){st.page=max;return loadAudit();}
+  const events=data.recovery_events||[];
+  root.innerHTML=table(['Date / time','Action','Operator','Detail','Recovery'],data.rows.map(x=>`<tr><td>${D(x.created_at)}</td><td>${E(x.action)}</td><td>${E(x.username||'System')}</td><td>${auditEventSummary(x)}</td><td>${auditRecoveryActions(x,events)}</td></tr>`))+pager('audit',data.total);
+  window.HWLang?.apply();
+ }catch(err){if(req===auditPageRequest&&document.body.contains(root))root.textContent=err.message;}
+}
 async function openMovementUndo(movementId,auditId){
  try{
   const info=await api('/api/recovery/movement/'+movementId);
@@ -1165,6 +1219,8 @@ function completeMovementPapers(m){
   `paperwork:${m.id}`,'Complete paperwork');
 }
 document.addEventListener('click',async e=>{
+ const pageButton=e.target.closest('[data-pager-key][data-pager-page]');
+ if(pageButton){const key=pageButton.dataset.pagerKey,state=pageState(key),page=Number(pageButton.dataset.pagerPage);if(!pageButton.disabled&&Number.isSafeInteger(page)&&page>0){state.page=page;refreshPagedView(key);setTimeout(()=>{const holders={inventory:'#itemResults',departments:'#departmentResults',item_movement:'#itemMovementResults',movements:'#movementResults',audit:'#auditLog',shipment_history:'#shipmentHistoryContent'};const holder=document.querySelector(holders[key]||(key.startsWith('item_history_')?`[data-item-history="${key.split('_').at(-1)}"]`:'#dashboardView'));if(key==='shipment_history'&&holder)holder.scrollTop=0;else holder?.querySelector('.db-table-wrap')?.scrollIntoView({block:'start',behavior:'smooth'});},100);}return;}
  const recoverMove=e.target.closest('[data-recover-movement]');if(recoverMove){await openMovementUndo(Number(recoverMove.dataset.recoverMovement),Number(recoverMove.dataset.sourceAudit)||0);return;}
  const redoMove=e.target.closest('[data-recovery-redo]');if(redoMove){openRecoveryRedo(Number(redoMove.dataset.recoveryRedo));return;}
  const undoEdit=e.target.closest('[data-recovery-audit-edit]');if(undoEdit){openAuditEditUndo(Number(undoEdit.dataset.recoveryAuditEdit));return;}
@@ -1282,19 +1338,20 @@ async function applyStatementPercent(){
  if(statementMode==='scarce')statementScarcePct=next;else statementSurplusPct=next;
  try{await reloadPositions()}catch(e){if(statementMode==='scarce')statementScarcePct=old;else statementSurplusPct=old;throw e}
 }
-document.addEventListener('input',e=>{if(e.target.id==='itemFilter')filterInventory();
+document.addEventListener('input',e=>{if(e.target.id==='itemFilter'){resetPage('inventory');filterInventory();}
  if(e.target.id==='statementSearch')filterStatement();
  if(e.target.id==='columnManagerSearch')searchColumnOptions(e.target.value);
  if(e.target.id==='movementFilter')filterMovements();
- if(e.target.id==='departmentFilter')filterDepartmentTable();
- if(e.target.id==='itemMovementSearch')filterItemMovements();
+ if(e.target.id==='departmentFilter'){resetPage('departments');filterDepartmentTable();}
+ if(e.target.id==='itemMovementSearch'){resetPage('item_movement');filterItemMovements();}
  if(e.target.matches('#issueForm [data-issue-qty]'))updateFefoNotices();
  if(e.target.matches('[data-dept-search]'))filterDeptPicker(e.target.closest('[data-dept-picker]'));});
 document.addEventListener('change',async e=>{
+ if(e.target.matches('[data-pager-size]')){const key=e.target.dataset.pagerSize,sz=Number(e.target.value);if(PAGE_SIZES.includes(sz)){pageState(key).size=sz;resetPage(key);refreshPagedView(key);}return;}
  if(e.target.id==='statementBranch'){
   const book=$('#statementBook');if(book){book.innerHTML=filterBookOptions(e.target.value);book.value='';}filterStatement();}
  if(e.target.id==='statementBook'||e.target.id==='statementSort')filterStatement();
- if(e.target.id==='itemStockStatus'||e.target.id==='itemSort'||e.target.id==='itemIncludeInactive')filterInventory();
+ if(e.target.id==='itemStockStatus'||e.target.id==='itemSort'||e.target.id==='itemIncludeInactive'){resetPage('inventory');filterInventory();}
  if(e.target.id==='statementExpiryBefore'){
   const old=statementExpiryBefore;
   statementExpiryBefore=e.target.value;
@@ -1305,8 +1362,8 @@ document.addEventListener('change',async e=>{
  if(e.target.matches('[data-issue-expiry-picker]'))syncIssueExpiry(e.target.closest('[data-issue-line]'));
  if(e.target.matches('[data-issue-same-date-lot]')){const line=e.target.closest('[data-issue-line]');line.querySelector('[data-issue-batch]').value=e.target.value;syncIssueBatch(line);}
  if(e.target.id==='movementType')filterMovements();
- if(e.target.id==='itemBranchFilter') { const filter=$('#itemBookFilter');if(filter){filter.innerHTML=filterBookOptions(e.target.value);filter.value=''}filterInventory(); }
- if(e.target.id==='itemBookFilter')filterInventory();
+ if(e.target.id==='itemBranchFilter') { resetPage('inventory');const filter=$('#itemBookFilter');if(filter){filter.innerHTML=filterBookOptions(e.target.value);filter.value=''}filterInventory(); }
+ if(e.target.id==='itemBookFilter'){resetPage('inventory');filterInventory();}
  if(e.target.matches('#issueForm input[name="route"]')||e.target.matches('#issueForm input[name="emergency_pending"]'))syncOutgoingDestination(e.target.closest('form'));
  if(e.target.matches('#receiveForm input[name="route"]'))syncIncomingRoute(e.target.closest('form'));
  if(e.target.matches('[data-receive-line] select[data-key="item_id"]'))prefillReceiptPrice(e.target.closest('[data-receive-line]'));
@@ -1321,8 +1378,7 @@ function syncUserBranchField(form){
  if(admin)branch.value='';
 }
 
-function filterMovements(){const q=($('#movementFilter')?.value||'').toLowerCase(),t=$('#movementType')?.value||'';
- const results=cache.movements.filter(x=>(!t||x.kind===t)&&JSON.stringify(x).toLowerCase().includes(q));$('#movementResults').innerHTML=table(['Movement ID','Type','Paper refs','Source / destination','Item lines','Operator'],movementRows(results));}
+function filterMovements(){resetPage('movements');loadMovementPage();}
 
 function openNotifications(){
  const root=$('#notificationModal');if(!root)return;

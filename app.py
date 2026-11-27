@@ -52,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 10
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.25.0'
+APP_RELEASE = '4.26.0'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -1173,6 +1173,53 @@ def department_shipments(department_id: int, request: Request, limit: int = 30, 
     with db(readonly=True) as c:
         return shipment_history_page(c, department_id=department_id, limit=limit, offset=offset)
 
+@app.get('/api/movements-page')
+def movements_page(request: Request, limit: int = 20, offset: int = 0, q: str = '', kind: str = ''):
+    # Database-backed pagination without the legacy 500-row cap.
+    get_user(request)
+    limit = max(1, min(100, limit)); offset = max(0, offset)
+    q = q.strip()[:160]
+    conditions = ['EXISTS (SELECT 1 FROM movement_lines any_line WHERE any_line.movement_id = m.id)']
+    args = []
+    if kind in ('IN', 'OUT', 'RETURN', 'ADJUST_PLUS', 'ADJUST_MINUS'):
+        conditions.append('m.kind=?'); args.append(kind)
+    if q:
+        like = '%' + q.lower() + '%'
+        conditions.append('''(LOWER(COALESCE(m.code,'')) LIKE ? OR LOWER(COALESCE(m.paper_ref,'')) LIKE ?
+            OR LOWER(COALESCE(m.dispatch_ref,'')) LIKE ? OR LOWER(COALESCE(m.source,'')) LIKE ?
+            OR LOWER(COALESCE(m.external_destination,'')) LIKE ? OR LOWER(COALESCE(d.name,'')) LIKE ?
+            OR LOWER(COALESCE(u.username,'')) LIKE ? OR EXISTS (
+                SELECT 1 FROM movement_lines ml2 JOIN batches b2 ON b2.id=ml2.batch_id
+                    JOIN items i2 ON i2.id=b2.item_id
+                WHERE ml2.movement_id=m.id AND
+                (LOWER(i2.name) LIKE ? OR LOWER(COALESCE(i2.trade_name,'')) LIKE ?
+                  OR LOWER(COALESCE(i2.sku,'')) LIKE ? OR LOWER(b2.batch_no) LIKE ?)))''')
+        args.extend([like] * 11)
+    where = ' AND '.join(conditions)
+    joins = '''FROM movements m LEFT JOIN departments d ON d.id=m.department_id
+                    LEFT JOIN users p ON p.id=m.trusted_pharmacist_id
+                    JOIN users u ON u.id=m.created_by'''
+    with db(readonly=True) as c:
+        total = c.execute(f'SELECT COUNT(*) {joins} WHERE {where}',args).fetchone()[0]
+        rows = [dict(x) for x in c.execute(f'''SELECT m.*,d.name department_name,u.username creator,
+                       p.full_name trusted_pharmacist_name,p.username trusted_pharmacist_username,
+                       (SELECT COUNT(*) FROM movement_lines mlc WHERE mlc.movement_id=m.id) line_count,
+                       (SELECT SUM(qty) FROM movement_lines mls WHERE mls.movement_id=m.id) total_units
+                       {joins} WHERE {where} ORDER BY m.id DESC LIMIT ? OFFSET ?''',args+[limit,offset])]
+        ids = [x['id'] for x in rows]
+        if ids:
+            placeholders = ','.join('?' for _ in ids)
+            lines = [dict(x) for x in c.execute(f'''SELECT ml.id line_id,ml.movement_id,ml.qty,ml.direction,
+                        ml.unit_price_fils,b.batch_no,b.expiry_date,b.manufacture_date,
+                        i.sku,i.name item_name,i.unit FROM movement_lines ml
+                        JOIN batches b ON b.id=ml.batch_id JOIN items i ON i.id=b.item_id
+                        WHERE ml.movement_id IN ({placeholders}) ORDER BY ml.id''', ids)]
+            grouped = {}
+            for line in lines: grouped.setdefault(line['movement_id'],[]).append(line)
+            for row in rows: row['lines'] = grouped.get(row['id'],[])
+        return {'total':total,'rows':rows,'limit':limit,'offset':offset}
+
+
 @app.get('/api/movements')
 def movements(request: Request):
     get_user(request)
@@ -1680,6 +1727,23 @@ async def reset_user_password(user_id: int, request: Request):
         c.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
         audit(c,u['id'],'PASSWORD_RESET',{'user_id':user_id})
     return {'ok':True}
+
+
+@app.get('/api/audit-page')
+def audit_history_page(request: Request, limit: int = 20, offset: int = 0):
+    u = get_user(request)
+    if u['role'] != 'admin':
+        err(403, 'Only administrators can view audit logs')
+    limit = max(1, min(100, limit)); offset = max(0, offset)
+    with db(readonly=True) as c:
+        total = c.execute('SELECT COUNT(*) FROM audit_log').fetchone()[0]
+        rows = [dict(x) for x in c.execute('''SELECT a.id,a.action,a.detail,a.created_at,u.username
+                         FROM audit_log a LEFT JOIN users u ON a.user_id=u.id
+                         ORDER BY a.id DESC LIMIT ? OFFSET ?''',(limit,offset))]
+        # Recovery events must span pages so Undo/Redo status is never guessed from the visible page alone.
+        recovery_events = [dict(x) for x in c.execute('''SELECT id,action,detail FROM audit_log
+                   WHERE action IN ('MOVEMENT_UNDO','MOVEMENT_REDO','AUDIT_EDIT_UNDO','AUDIT_EDIT_REDO') ORDER BY id DESC''')]
+        return {'total':total,'rows':rows,'recovery_events':recovery_events,'limit':limit,'offset':offset}
 
 
 @app.get('/api/audit')
