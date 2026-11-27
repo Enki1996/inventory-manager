@@ -1,4 +1,4 @@
-/* Live V4.19 bilingual warehouse application: all stock, including opening balances, is audited. */
+/* Live V4.20 bilingual warehouse application: all stock, including opening balances, is audited. */
 const $ = (s, root=document)=>root.querySelector(s);
 const $$ = (s, root=document)=>[...root.querySelectorAll(s)];
 const I = name=>`<svg class="i" aria-hidden="true"><use href="#ico-${name}"/></svg>`;
@@ -358,8 +358,32 @@ function movementRows(movements){return movements.map(m=>{
  const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
- return `<tr><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td>${m.lines.map((l,i)=>`<div><span class="movement-item-number">${N(i+1)}.</span> <strong>${E(l.item_name)}</strong> · ${E(l.batch_no)} · ${N(l.qty)} ${E(l.unit)}<div class="tiny">Mfg: ${E(l.manufacture_date||'—')} · Exp: ${E(l.expiry_date||'—')} · ${priceLabel(l.unit_price_fils)}</div></div>`).join('<div style="height:5px"></div>')}</td><td>${E(m.creator)}</td></tr>`;
-})}
+ const lines=Array.isArray(m.lines)?m.lines:[],first=lines[0];
+ const preview=first?`<div class="movement-line-summary"><strong>${E(first.item_name)}</strong><span class="tiny">${E(first.batch_no)} · ${N(first.qty)} ${E(first.unit)}</span></div>`:'<span class="muted-hint">No lines recorded</span>';
+ const countLabel=lines.length===1?(window.HWLang?.get()==='ar'?'مادة واحدة':'1 item'):(window.HWLang?.get()==='ar'?`${N(lines.length)} مواد`:`${N(lines.length)} items`);
+ return `<tr class="movement-master-row" data-movement-master="${m.id}"><td><strong>${E(m.code)}</strong><div class="tiny">${D(m.created_at)}</div></td><td>${badge(movementLabel(m),m.route==='opening_balance'?'adjustment':(movementBadgeType[m.kind]||'neutral'))}<div class="tiny">${E(routeNames[m.route]||'Legacy movement')}</div></td><td>${docs}</td><td>${E(recipient)}${m.trusted_pharmacist_name||m.trusted_pharmacist_username?`<div class="tiny">Trusted pharmacist: ${E(m.trusted_pharmacist_name||m.trusted_pharmacist_username)}</div>`:''}${m.authorization_ref?`<div class="tiny">Authorization letter no.: ${E(m.authorization_ref)}</div>`:''}</td><td><div class="movement-lines-cell">${preview}<button type="button" class="movement-expand-btn" data-expand-movement="${m.id}" aria-expanded="false" aria-label="${E(window.HWLang?.get()==='ar'?'عرض جميع مواد المستند':'Show all receipt items')}" title="${E(window.HWLang?.get()==='ar'?'عرض تفاصيل المستند':'Full receipt details')}"><span class="movement-count-pill">${E(countLabel)}</span><span class="movement-chevron" aria-hidden="true">▾</span></button></div></td><td>${E(m.creator)}</td></tr>`;
+ });}
+// Expand a document without another database call. The existing /api/movements
+// response already contains every line for each returned receipt/issue.
+function movementDetailsRow(m){
+ const lines=Array.isArray(m.lines)?m.lines:[];
+ const route=routeNames[m.route]||'Recorded movement',recipient=m.department_name||m.external_destination||m.source||'—';
+ const headers=['#','Item / المادة','Batch / الوجبة','Manufacture date / الإنتاج','Expiry / الصلاحية','Qty / الكمية','Price / السعر'];
+ const body=lines.map((l,i)=>`<tr><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(l.item_name)}</strong><div class="tiny">${E(l.sku||'')}</div></td><td>${E(l.batch_no||'—')}</td><td>${E(l.manufacture_date||'—')}</td><td>${E(l.expiry_date||'—')}</td><td><strong>${N(l.qty)}</strong> ${E(l.unit)}</td><td>${priceLabel(l.unit_price_fils)}</td></tr>`).join('');
+ const docs=[m.paper_ref?`<span><strong>Order / المستند:</strong> ${E(m.paper_ref)}</span>`:'',m.dispatch_ref?`<span><strong>Dispatch / التجهيز:</strong> ${E(m.dispatch_ref)}</span>`:'',m.authorization_ref?`<span><strong>Authorization / التخويل:</strong> ${E(m.authorization_ref)}</span>`:''].filter(Boolean).join('');
+ return `<tr class="movement-details-row" data-expanded-movement="${m.id}"><td colspan="6"><div class="movement-details-panel" role="region" aria-label="${E('Details for '+m.code)}"><div class="movement-details-header"><div><strong>${E(m.code)} · ${E(route)}</strong><span>${E(recipient)} · ${D(m.created_at)} · ${E(m.creator||'')}</span></div><span class="movement-detail-count">${N(lines.length)} ${window.HWLang?.get()==='ar'?'سطر مواد':'item lines'}</span></div>${docs?`<div class="movement-document-refs">${docs}</div>`:''}<div class="db-table-wrap"><table class="db-table movement-lines-table"><thead><tr>${headers.map(h=>`<th>${E(h)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>${!lines.length?'<p class="muted-hint">No item lines found.</p>':''}</div></td></tr>`;
+}
+function toggleMovementDetails(button){
+ const row=button.closest('tr[data-movement-master]');if(!row)return;
+ const id=Number(button.dataset.expandMovement),expanded=row.nextElementSibling;
+ if(expanded?.matches(`[data-expanded-movement="${id}"]`)){
+  expanded.remove();button.setAttribute('aria-expanded','false');button.querySelector('.movement-chevron').textContent='▾';return;
+ }
+ const movement=cache.movements.find(m=>m.id===id);if(!movement)return;
+ row.insertAdjacentHTML('afterend',movementDetailsRow(movement));
+ button.setAttribute('aria-expanded','true');button.querySelector('.movement-chevron').textContent='▴';
+ window.HWLang?.apply();
+}
 
 function batchRows(rows){return rows.map((b,i)=>`<tr><td><span class="item-row-number">${N(i+1)}</span></td><td><strong>${E(b.item_name)}</strong><div class="tiny">${E(b.sku)}</div></td><td>${E(branchName(b.branch))}</td><td>${E(b.batch_no)}</td><td>${E(b.expiry_date||'Not applicable')}</td><td>${priceLabel(b.unit_price_fils)}</td><td><strong>${N(b.on_hand)}</strong> ${E(b.unit)}</td><td>${b.expiry_date&&b.expiry_date<todayBaghdad()?badge('Expired','danger'):b.on_hand===0?badge('Empty'):badge('Available','blue')}</td></tr>`)}
 function overview(){
@@ -558,8 +582,8 @@ function updateFefoNotices(form=$('#issueForm')){
    message.innerHTML=`${E(ar?'تم اختيار وجبة أحدث صلاحية. يُنصح باختيار الأقرب انتهاءً أولاً: ':'A later-expiring lot is selected. Recommended first: ')}${E(best.batch_no)} · ${E(best.expiry_date||'—')} <button type="button" class="fefo-pick" data-fefo-pick="${best.id}">${ar?'اختيار الأقرب':'Select earliest'}</button>`;
   }else if(!lot){message.classList.add('warning');message.textContent=(ar?'الأقرب انتهاءً أولاً (FEFO): ':'Earliest expiry first (FEFO): ')+closest;}
   else if(days===null){message.classList.add('warning');message.textContent=ar?'تاريخ انتهاء هذه الوجبة غير مسجّل. تحقق من الصلاحية قبل الصرف.':'This lot has no recorded expiry. Verify the date before issue.';}
-  else if(days<=60){message.classList.add('warning');message.textContent=(ar?'⚠ أقرب وجبة للصرف؛ متبقي ':'⚠ Earliest lot to issue; ')+N(days)+(ar?' يوم. ':' days left. ')+closest;}
-  else{message.classList.add('success');message.textContent=(ar?'✓ صرف حسب أقرب تاريخ صلاحية: ':'✓ FEFO priority: ')+closest;}
+  else if(days<=60){message.classList.add('warning');message.textContent=(ar?'★ ⚠ أقرب وجبة للصرف؛ متبقي ':'★ ⚠ Earliest lot to issue; ')+N(days)+(ar?' يوم. ':' days left. ')+closest;}
+  else{message.classList.add('success');message.textContent=(ar?'★ ✓ صرف حسب أقرب تاريخ صلاحية: ':'★ ✓ FEFO priority: ')+closest;}
  }
  const wrap=form.querySelector('[data-fefo-override-wrap]');
  if(wrap){wrap.hidden=!warnings.length;const reason=wrap.querySelector('[name="fefo_override_reason"]');if(reason)reason.required=!!warnings.length;}
@@ -578,7 +602,9 @@ function syncIssueProduct(line, preferredBatch=null){
  const expirySelect=line.querySelector('[data-issue-expiry-picker]');
  const former=cache.batches.find(b=>b.id===Number(preferredBatch??line.querySelector('[data-issue-batch]')?.value));
  const dates=[...new Set(lots.map(b=>b.expiry_date||''))];
- expirySelect.innerHTML=selectOptions(dates.map(date=>({value:date||'unknown',label:date||'تاريخ الصلاحية غير مسجل'})),'','اختر تاريخ الصلاحية');
+ expirySelect.innerHTML=selectOptions(dates.map((date,i)=>({value:date||'unknown',label:i===0?`★ ${date||'تاريخ الصلاحية غير مسجل'} · ${fefoAr()?'الموصى بها':'Recommended'}`:date||'تاريخ الصلاحية غير مسجل'})),'','اختر تاريخ الصلاحية');
+ expirySelect.classList.toggle('fefo-recommended-select',!!dates.length);
+ expirySelect.title=dates.length?(fefoAr()?'★ أقرب تاريخ صلاحية صالح للصرف':'★ Earliest usable expiration date recommended'):'';
  expirySelect.value=dates.includes(former?.expiry_date||null)?former.expiry_date||'unknown':dates.length?(dates[0]||'unknown'):'';
  syncIssueExpiry(line,preferredBatch);
  window.HWLang?.apply();
@@ -1001,6 +1027,7 @@ function completeMovementPapers(m){
   `paperwork:${m.id}`,'Complete paperwork');
 }
 document.addEventListener('click',async e=>{
+ const movementToggle=e.target.closest('[data-expand-movement]');if(movementToggle){toggleMovementDetails(movementToggle);return;}
  const v=e.target.closest('[data-view],[data-go]');if(v){route(v.dataset.view||v.dataset.go);return}
  const expand=e.target.closest('[data-expand-item]');if(expand){
   const id=Number(expand.dataset.expandItem),detail=document.querySelector(`[data-detail-row="${id}"]`);

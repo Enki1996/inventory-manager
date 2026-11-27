@@ -1,3 +1,7 @@
+## V4.20 update
+
+See `V4_20_CHANGES.md`. Schema V9 unchanged. Keep existing `/data` volume and back up before updating.
+
 ## V4.19 upgrade note
 This release changes interface code only. Schema remains **9**. Redeploy to the same service, retain `/data`, and check `/api/health` reports `4.19.0`. Do not restore or replace the database for this update.
 
