@@ -34,4 +34,31 @@
     },{rootMargin:'-21% 0px -49% 0px',threshold:[0,.15,.3,.55]});
     document.querySelectorAll('.section-anchor').forEach(section=>observer.observe(section));
   }
+
+  // V4.24: restrained pointer parallax on the illustrative warehouse network.
+  // The effect is purely visual; no mouse tracking is stored or transmitted.
+  const scene=document.querySelector('[data-hero-scene]');
+  if(scene && window.matchMedia('(pointer:fine)').matches && !window.matchMedia('(prefers-reduced-motion:reduce)').matches){
+    const target=scene.querySelector('[data-hero-tilt]');
+    let frame=0, x=0, y=0;
+    const paint=()=>{
+      frame=0;
+      scene.style.setProperty('--mx',(x*100).toFixed(1)+'%');
+      scene.style.setProperty('--my',(y*100).toFixed(1)+'%');
+      scene.style.setProperty('--tilt-x',((.5-y)*4.5).toFixed(2)+'deg');
+      scene.style.setProperty('--tilt-y',((x-.5)*5.5).toFixed(2)+'deg');
+    };
+    scene.addEventListener('pointermove',event=>{
+      if(event.pointerType!=='mouse' && event.pointerType!=='pen') return;
+      const rect=target.getBoundingClientRect();
+      x=Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width));
+      y=Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height));
+      if(!frame)frame=requestAnimationFrame(paint);
+    },{passive:true});
+    scene.addEventListener('pointerleave',()=>{
+      if(frame){cancelAnimationFrame(frame);frame=0}
+      scene.style.removeProperty('--mx');scene.style.removeProperty('--my');
+      scene.style.removeProperty('--tilt-x');scene.style.removeProperty('--tilt-y');
+    });
+  }
 })();

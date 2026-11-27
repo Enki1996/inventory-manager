@@ -77,3 +77,7 @@ Keep the existing Railway `/data` volume; this version does not change schema V9
 ## V4.23 Home/Logo/Legal Pages
 
 Update your existing GitHub repository with V4.23 and redeploy the **same** Railway web service. Keep `/data` (persistent volume) and the existing environment variables untouched. No database restoration or scheduler changes are needed. Check `/api/health` for `"release":"4.23.0"` and `"version":9`. Verify `/`, `/login.html`, `/privacy.html` and `/terms.html` and review the policy draft before official use.
+
+
+## V4.24
+Frontend hero update only. Keep the existing `/data` volume and secrets. Verify `/api/health` reports `release: 4.24.0`.

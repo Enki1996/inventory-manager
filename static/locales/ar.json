@@ -995,5 +995,16 @@
   "7. Monitoring and audit logs": "٧. المتابعة وسجلات التدقيق",
   "The application records activity such as sign-ins, stock movements and administrative changes to support accountability and investigation. Users must not alter records or perform actions outside their permissions.": "يسجل التطبيق أنشطة مثل تسجيل الدخول وحركات المخزون والتعديلات الإدارية لدعم المساءلة والتحقق. ولا يجوز للمستخدمين العبث بالسجلات أو تنفيذ إجراءات خارج نطاق صلاحياتهم.",
   "8. Administration and policy updates": "٨. الإدارة وتحديث السياسات",
-  "The hospital or designated operator determines approved procedures, account access and acceptable use. Terms may be revised as the application evolves; the responsible institution should review and approve the final terms before official use.": "تحدد إدارة المستشفى أو الجهة المشغلة الإجراءات المعتمدة وصلاحيات الحسابات وضوابط الاستخدام. وقد تُحدث هذه الشروط مع تطور التطبيق، ويجب مراجعتها واعتمادها من الجهة المسؤولة قبل الاستخدام الرسمي."
+  "The hospital or designated operator determines approved procedures, account access and acceptable use. Terms may be revised as the application evolves; the responsible institution should review and approve the final terms before official use.": "تحدد إدارة المستشفى أو الجهة المشغلة الإجراءات المعتمدة وصلاحيات الحسابات وضوابط الاستخدام. وقد تُحدث هذه الشروط مع تطور التطبيق، ويجب مراجعتها واعتمادها من الجهة المسؤولة قبل الاستخدام الرسمي.",
+  "WAREHOUSE FLOW": "تدفق عمليات المخزن",
+  "One connected workspace": "مساحة عمل مترابطة",
+  "SYSTEM FLOW": "مسار العمليات",
+  "Central warehouse": "المخزن المركزي",
+  "Stock · Lots · Expiry": "المخزون · الوجبات · الصلاحية",
+  "Receive": "استلام",
+  "Incoming stock": "الشحنات الواردة",
+  "Distribute": "التجهيز",
+  "Trace": "التتبع",
+  "Illustrative workflow • No live data": "عرض توضيحي للعمليات • دون بيانات حقيقية",
+  "Interactive illustration of connected warehouse operations": "رسم تفاعلي لحركة عمليات المخزن"
 }
