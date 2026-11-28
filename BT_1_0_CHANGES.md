@@ -1,0 +1,1 @@
+BT 1.0: public typography swap, larger IMS branding, dashboard shortcut cleanup, operational Google Drive backup summary, release branding and linked WEBNEXIQ credit. Scheduler remains 10:00 and 14:00 Baghdad time; cron service must remain configured. No schema change from V4.30. Status is based on recorded results, not direct scheduler health.

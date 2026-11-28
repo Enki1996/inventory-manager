@@ -52,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 11
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.30'
+APP_RELEASE = 'BT 1.0'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -2107,6 +2107,46 @@ def gdrive_error(exc):
     if isinstance(exc, gdrive.CloudBackupError):
         err(409, str(exc))
     raise exc
+
+
+@app.get('/api/backup-summary')
+def backup_summary(request: Request):
+    get_user(request)
+    # Only operational status is exposed to staff, never OAuth data or filenames.
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    local = now_utc.astimezone(gdrive.TIMEZONE)
+    slots = [dt.datetime.combine(local.date() + dt.timedelta(days=d), dt.time(h), tzinfo=gdrive.TIMEZONE)
+             for d in (-1, 0, 1) for h in gdrive.SLOTS]
+    upcoming = min(x for x in slots if x > local)
+    due = max(x for x in slots if x <= local)
+    result = {'server_utc': now_utc.isoformat(), 'next_utc': upcoming.isoformat(),
+              'state': 'unconfigured', 'last_success_utc': None, 'last_failure_utc': None,
+              'previous_scheduled': 'unknown'}
+    try:
+        if not gdrive.ready():
+            return result
+        state = gdrive.load_state(DATA)
+        if not state.get('refresh_token'):
+            result['state'] = 'disconnected'
+            return result
+        result['last_success_utc'] = state.get('last_success_utc')
+        result['last_failure_utc'] = state.get('last_failure_utc')
+        slot = due.strftime('%Y-%m-%d-%H')
+        done = slot in state.get('completed_slots', [])
+        pending = local - due < dt.timedelta(minutes=46)
+        result['previous_scheduled'] = 'complete' if done else 'pending' if pending else 'missed'
+        if state.get('last_error'):
+            result['state'] = 'error'
+        elif len(os.getenv('WAREHOUSE_BACKUP_CRON_SECRET', '')) < 32:
+            result['state'] = 'unconfigured'
+        elif not done and not pending:
+            result['state'] = 'missed'
+        else:
+            result['state'] = 'connected'
+        return result
+    except Exception:
+        result['state'] = 'error'
+        return result
 
 
 @app.get('/api/gdrive/status')

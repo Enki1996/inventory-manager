@@ -443,7 +443,7 @@ function overview(){
  const kpis=`<div class="db-kpis">${metrics.map(([label,num,desc,icon])=>`<div class="db-kpi"><span class="name">${I(icon)} ${E(label)}</span><span class="num">${N(num)}</span><span class="desc">${E(desc)}</span></div>`).join('')}</div>`;
  const exp=cache.batches.filter(b=>b.on_hand>0&&b.expiry_date&&b.expiry_date>=todayBaghdad()&&b.expiry_date<=new Date(Date.now()+60*864e5).toISOString().slice(0,10));
  return `<div class="db-decor">${head('Welcome back, '+user.full_name,'Your central warehouse is connected to the local database. Inventory and movements below update after every saved transaction.')}
- <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${can('department_write')?`<button class="db-btn secondary" data-new="dept">${I('building')} Add department</button>`:''}${allowedTab('receiving')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button>`:''}${allowedTab('distribution')?`<button class="db-btn secondary" data-go="distribution">${I('outgoing')} Distribute stock</button>`:''}</div></div>
+ <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${allowedTab('receiving')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button>`:''}${allowedTab('distribution')?`<button class="db-btn secondary" data-go="distribution">${I('outgoing')} Stock issue voucher</button>`:''}</div></div>
  ${user.role!=='admin'&&!user.branch?'<div class="db-alert"><strong>Warehouse branch not assigned.</strong> Ask your administrator to assign your account to one branch before managing stock.</div>':''}
  ${user.must_change_password?`<div class="db-alert"><strong>Change your temporary password.</strong> Open My account → Change password to secure your login.</div>`:''}
  ${kpis}<div class="db-layout"><div>${panel('Recent warehouse movements',table(['Movement','Type','Paper reference','From / To','Lines','By'],movementRows(cache.movements.slice(0,6))),'history')}</div><div>${panel('Attention needed',`<div class="db-help">${I('warning')} ${exp.length} <span>Expiring batches (next 60 days)</span></div>`,'warning')}
@@ -932,7 +932,7 @@ function editItem(it=null){
  const form=$('#entityForm');form.classList.add('item-form-grid');
  form.dataset.originalBranch=it?.branch||'';form.dataset.originalUnit=it?.unit||'';
  const dlg=form.closest('.modal-body');
- dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">V4.22</span>');
+ dlg.querySelector('h2')?.insertAdjacentHTML('beforeend',' <span class="form-version" translate="no">BT 1.0</span>');
  syncItemBranchFields(form,it?.category||'',it?.unit||'');
  syncOpeningBalanceFields(form);
  window.HWLang?.apply();

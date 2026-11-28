@@ -1,3 +1,7 @@
+# IMS — BT 1.0 (testing release)
+
+Current release BT 1.0; SQLite schema 11. Historical version notes below remain for reference.
+
 # Hospital Warehouse IMS V4.28 — Analytics
 
 See `V4_28_ANALYTICS.md`. Existing schema V10 and Railway volume remain unchanged. All four supplied fonts are already bundled.

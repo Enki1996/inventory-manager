@@ -1096,5 +1096,7 @@
   "Main hospital warehouse / Live workspace": "مذخر المستشفى الرئيسي / مساحة العمل",
   "Main hospital warehouse": "مذخر المستشفى الرئيسي",
   "Quick tour": "جولة سريعة",
-  "Calculated against the monthly requirement. Scarce: below ${E(statementMode==='scarce'?threshold:DEFAULT_SCARCE_PERCENT)}%. Surplus: above ${E(statementMode==='surplus'?threshold:DEFAULT_SURPLUS_PERCENT)}%.": "يُحسب هذا وفق الاحتياج الشهري. الشحيح: أقل من النسبة المحددة. الفائض: أعلى من النسبة المحددة."
+  "Calculated against the monthly requirement. Scarce: below ${E(statementMode==='scarce'?threshold:DEFAULT_SCARCE_PERCENT)}%. Surplus: above ${E(statementMode==='surplus'?threshold:DEFAULT_SURPLUS_PERCENT)}%.": "يُحسب هذا وفق الاحتياج الشهري. الشحيح: أقل من النسبة المحددة. الفائض: أعلى من النسبة المحددة.",
+  "Designed by": "تصميم",
+  "© 2026 IMS · المذخر · BT 1.0": "© 2026 IMS · المذخر · BT 1.0"
 }
