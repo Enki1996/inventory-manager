@@ -421,3 +421,5 @@ body.tour-open{overflow:hidden}
 @media(max-width:760px){.role-picker,.role-guide-grid,.role-summary-columns{grid-template-columns:1fr}.tour-overlay{padding:14px}.tour-card{padding:18px}}
 
 .db-grid>.wide{grid-column:1/-1}
+
+.tour-overlay{background:rgba(16,45,64,.16);backdrop-filter:none;-webkit-backdrop-filter:none}.tour-highlight{outline:3px solid #08a6a3;outline-offset:3px;box-shadow:0 0 0 5px rgba(8,166,163,.20);border-radius:8px}.tour-card{box-shadow:0 12px 40px #163e5540}.custom-access{padding:14px;border:1px solid #cde5e9;border-radius:12px;background:#f4fbfc}.access-toggle,.access-grid label{display:flex;align-items:center;gap:8px;font-size:12px}.access-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:10px 0}.custom-access h3{font-size:13px;margin:12px 0}.custom-access p{margin:10px 0!important}.custom-access input{accent-color:#079f9c;flex:none;width:16px;height:16px}.custom-access[hidden], [data-custom-options][hidden], [data-user-role-summary][hidden], [data-go][hidden]{display:none!important}@media(max-width:550px){.access-grid{grid-template-columns:1fr}}

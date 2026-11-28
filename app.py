@@ -50,9 +50,9 @@ DB = DATA / 'warehouse.sqlite3'
 BACKUPS = DATA / 'safety_backups'
 BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.28'
+APP_RELEASE = '4.30'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -67,6 +67,29 @@ WRITE_PERMS = {
     'operator': {'movement_write'},
     'viewer': set(),
 }
+CUSTOM_ACTIONS = {'item_write','department_write','receive','issue','return_stock','paperwork','adjust','opening_stock'}
+CUSTOM_TABS = {'inventory','movements','item_movement','departments','positions','reports'}
+def default_actions(role):
+    actions = set(WRITE_PERMS[role])
+    if 'movement_write' in actions: actions.update({'receive','issue','return_stock','paperwork'})
+    if 'item_write' in actions: actions.add('opening_stock')
+    return actions
+
+def effective_actions(user):
+    if user['role']=='admin' or not user.get('custom_access'): return default_actions(user['role'])
+    return set(json.loads(user['custom_access'])['actions']) & CUSTOM_ACTIONS
+
+def normalize_access(role, value):
+    if value is None: return None
+    if role=='admin': err(422,'Administrator access cannot be customized')
+    if not isinstance(value,dict): err(422,'Invalid custom access')
+    result={}
+    for key,allowed in [('actions',CUSTOM_ACTIONS),('tabs',CUSTOM_TABS)]:
+        vals=value.get(key)
+        if not isinstance(vals,list) or any(not isinstance(v,str) or v not in allowed for v in vals): err(422,'Invalid custom access option')
+        result[key]=sorted(set(vals))
+    return json.dumps(result,sort_keys=True,separators=(',',':'))
+
 app = FastAPI(title='Hospital Warehouse IMS', docs_url=None, redoc_url=None)
 app.mount('/static', StaticFiles(directory=str(STATIC)), name='static')
 
@@ -513,6 +536,12 @@ def migrate_recovery_v10(c: sqlite3.Connection):
     c.execute("INSERT INTO app_meta(key,value) VALUES('schema_version',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 
 
+def migrate_custom_access(c):
+    if 'custom_access' not in {r[1] for r in c.execute('PRAGMA table_info(users)')}:
+        c.execute('ALTER TABLE users ADD COLUMN custom_access TEXT')
+    c.execute("UPDATE app_meta SET value=? WHERE key='schema_version'",(str(SCHEMA_VERSION),))
+
+
 def init_db():
     with db() as c:
         c.executescript('''
@@ -621,6 +650,7 @@ def init_db():
         migrate_annual_need(c)
         migrate_v9(c)
         migrate_recovery_v10(c)
+        migrate_custom_access(c)
         seed_default_departments(c)
         count = c.execute('SELECT COUNT(*) n FROM users').fetchone()['n']
         if PUBLIC_DEPLOY and count > 0:
@@ -678,7 +708,7 @@ def get_user(request: Request, *, require_csrf=False):
     if len(sid) != 64:
         err(401, 'Sign in required')
     with db(readonly=True) as c:
-        row = c.execute('''SELECT u.id,u.username,u.full_name,u.role,u.is_active,u.must_change_password,u.branch,s.csrf
+        row = c.execute('''SELECT u.id,u.username,u.full_name,u.role,u.is_active,u.must_change_password,u.branch,u.custom_access,s.csrf
                            FROM sessions s JOIN users u ON s.user_id=u.id
                            WHERE s.token_hash=? AND s.expires_at>?''',
                         (hashlib.sha256(sid.encode()).hexdigest(), now())).fetchone()
@@ -690,7 +720,7 @@ def get_user(request: Request, *, require_csrf=False):
 
 
 def permit(user, permission):
-    if permission not in WRITE_PERMS[user['role']]:
+    if permission not in effective_actions(user):
         err(403, f'Your role ({user["role"]}) cannot perform this action')
 
 
@@ -821,7 +851,7 @@ async def login(request: Request):
 def me(request: Request):
     u = get_user(request)
     return {'id': u['id'], 'username': u['username'], 'full_name': u['full_name'], 'role': u['role'],
-            'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'is_ultra_admin': is_ultra_admin(u), 'permissions': sorted(WRITE_PERMS[u['role']])}
+            'must_change_password': bool(u['must_change_password']), 'branch': u['branch'], 'branches': BRANCHES, 'csrf': u['csrf'], 'is_ultra_admin': is_ultra_admin(u), 'permissions': sorted(effective_actions(u)), 'custom_access': json.loads(u['custom_access']) if u['custom_access'] else None}
 
 
 
@@ -966,6 +996,7 @@ async def create_item(request: Request):
     opening_balance = boolean_flag(d.get('opening_balance'), 'opening_balance')
     opening_lots = []
     if opening_balance:
+        permit(u,'opening_stock')
         # All opening lots are validated up front and written atomically.
         opening_lots = opening_lot_details(d)
         # Multiple lot-specific values must not be misrepresented as one
@@ -1311,13 +1342,11 @@ def fefo_deviations(c: sqlite3.Connection, lines: list[dict[str, Any]]) -> list[
 @app.post('/api/movements')
 async def create_movement(request: Request):
     u = get_user(request, require_csrf=True)
-    permit(u, 'movement_write')
     d = await request.json()
     kind = str(d.get('kind', ''))
     if kind not in ('IN','OUT','RETURN','ADJUST_PLUS','ADJUST_MINUS'):
         err(422, 'Invalid movement type')
-    if kind.startswith('ADJUST'):
-        permit(u, 'adjust')
+    permit(u, {'IN':'receive','OUT':'issue','RETURN':'return_stock','ADJUST_PLUS':'adjust','ADJUST_MINUS':'adjust'}[kind])
 
     # Route is authoritative: old clients may omit it for legacy inbound receipts,
     # but all new outgoing transfers must choose one of three explicit routes.
@@ -1480,7 +1509,7 @@ async def create_movement(request: Request):
 async def complete_emergency_paperwork(movement_id: int, request: Request):
     # Append missing emergency paperwork while preserving the original issue and stock.
     u = get_user(request, require_csrf=True)
-    permit(u, 'movement_write')
+    permit(u, 'paperwork')
     d = await request.json()
     order_ref = validated_text(d, 'paper_ref', max_len=80)
     dispatch_ref = validated_text(d, 'dispatch_ref', max_len=80)
@@ -1754,7 +1783,7 @@ def list_users(request: Request):
     u = get_user(request)
     permit(u,'users')
     with db(readonly=True) as c:
-        return [dict(x) | {'is_ultra_admin': is_ultra_admin(x)} for x in c.execute('''SELECT id,username,full_name,role,branch,is_active,must_change_password,created_at
+        return [dict(x) | {'is_ultra_admin': is_ultra_admin(x)} for x in c.execute('''SELECT id,username,full_name,role,branch,is_active,must_change_password,created_at,custom_access
                                                FROM users ORDER BY is_active DESC,id''')]
 
 
@@ -1786,14 +1815,15 @@ async def create_user(request: Request):
     if role not in ROLES:
         err(422,'Select a valid role')
     branch = user_branch_from_request(role, d.get('branch'))
+    access = normalize_access(role,d.get('custom_access'))
     password = str(d.get('password',''))
     if not 8<=len(password)<=128:
         err(422,'New account password must contain 8 to 128 characters')
     try:
         with db() as c:
-            new_id = c.execute('''INSERT INTO users(username,password_hash,full_name,role,branch,created_at,must_change_password)
-                                  VALUES (?,?,?,?,?,?,1)''', (username,pw_hash(password),name,role,branch,now())).lastrowid
-            audit(c,u['id'],'USER_CREATED',{'id':new_id,'username':username,'role':role,'branch':branch})
+            new_id = c.execute('''INSERT INTO users(username,password_hash,full_name,role,branch,created_at,must_change_password,custom_access)
+                                  VALUES (?,?,?,?,?,?,1,?)''', (username,pw_hash(password),name,role,branch,now(),access)).lastrowid
+            audit(c,u['id'],'USER_CREATED',{'id':new_id,'username':username,'role':role,'branch':branch,'custom_access':access})
             return {'ok':True,'id':new_id}
     except sqlite3.IntegrityError:
         err(409,'Username already exists')
@@ -1816,15 +1846,16 @@ async def edit_user(user_id: int, request: Request):
         if role not in ROLES:
             err(422,'Invalid role')
         branch = user_branch_from_request(role, d.get('branch', target['branch']))
+        access = normalize_access(role,d['custom_access']) if 'custom_access' in d else (target['custom_access'] if role==target['role'] else None)
         active = 1 if d.get('is_active',bool(target['is_active'])) else 0
         if target['role']=='admin' and (role!='admin' or not active):
             active_admins = c.execute("SELECT COUNT(*) n FROM users WHERE role='admin' AND is_active=1").fetchone()['n']
             if active_admins<=1:
                 err(409,'You cannot remove the last active administrator')
-        c.execute('UPDATE users SET role=?,branch=?,is_active=? WHERE id=?',(role,branch,active,user_id))
-        if role != target['role'] or branch != target['branch'] or not active:
+        c.execute('UPDATE users SET role=?,branch=?,is_active=?,custom_access=? WHERE id=?',(role,branch,active,access,user_id))
+        if role != target['role'] or branch != target['branch'] or not active or access != target['custom_access']:
             c.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
-        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'branch':branch,'active':bool(active), 'before': {'role':target['role'],'branch':target['branch'],'is_active':target['is_active']}, 'after':{'role':role,'branch':branch,'is_active':active}})
+        audit(c,u['id'],'USER_UPDATED',{'id':user_id,'role':role,'branch':branch,'active':bool(active), 'before': {'role':target['role'],'branch':target['branch'],'is_active':target['is_active'],'custom_access':target['custom_access']}, 'after':{'role':role,'branch':branch,'is_active':active,'custom_access':access}})
     return {'ok':True}
 
 
@@ -2020,6 +2051,7 @@ def restore_backup_bytes(content, u, *, cloud_file_id=None):
                 tables_v10 = {r[0] for r in verify.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 if not {'movement_reversals','audit_field_reversals'}.issubset(tables_v10):
                     err(422, 'Backup declares V10 but is missing recovery tables')
+            migrate_custom_access(verify)
             seed_default_departments(verify)  # Older backups gain starter departments without deleting user records.
             verify.commit()
         except sqlite3.DatabaseError:
@@ -2418,6 +2450,11 @@ def audit_edit_reapply(c,user,original_audit_id,*,redo,reason):
     if not isinstance(before,dict) or not isinstance(after,dict):
         err(409,'Older audit records have no trustworthy before/after snapshot; cannot reverse')
     table,keys=RECOVER_EDIT_FIELDS[source['action']]
+    if table=='users':
+        if 'custom_access' in before and 'custom_access' in after: keys=keys+('custom_access',)
+        else:
+            current=c.execute('SELECT custom_access FROM users WHERE id=?',(detail['id'],)).fetchone()
+            if current and current[0] is not None: err(409,'Custom permissions changed since this older event')
     if any(k not in before or k not in after for k in keys):
         err(409,'Audit snapshots are incomplete')
     oid=int(detail['id'])

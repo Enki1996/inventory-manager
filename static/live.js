@@ -242,6 +242,7 @@ async function reloadPositions(){
 
 const headers={overview:'Warehouse Overview',inventory:'Inventory',item_movement:'Item movements',profile:'My account',receiving:'Stock receipt voucher',distribution:'Stock issue voucher',returns:'Stock Adjustments',movements:'Movement History',batches:'Batches & Expiry',departments:'Departments',positions:'Warehouse Statements',reports:'Reports',users:'Users & Permissions',backup:'Backup & Restore',settings:'Audit logs'};
 const can=p=>!!user?.permissions.includes(p);
+const allowedTab=t=>{if(t==='users')return can('users');if(t==='backup')return can('backup');if(t==='settings')return user.role==='admin';if(t==='receiving')return can('receive')||can('return_stock');if(t==='distribution')return can('issue');if(t==='returns')return can('adjust');return !user.custom_access||!['inventory','movements','item_movement','departments','positions','reports'].includes(t)||user.custom_access.tabs.includes(t);};
 const BRANCHES=[['medication','Medication'],['medical_supplies','Medical Supplies'],['surgical_instruments','Surgical Instruments']];
 const branchName=b=>BRANCHES.find(x=>x[0]===b)?.[1]||'Unassigned — admin classification needed';
 const canEditBranch=b=>can('item_write')&&(user?.role==='admin'||(!!user?.branch&&user.branch===b));
@@ -350,12 +351,12 @@ function rolePresetCards(selected='viewer'){return `<div class="role-picker" dat
 function rolePresetSummary(selected='viewer'){const meta=ROLE_PRESETS[selected]||ROLE_PRESETS.viewer;return `<div class="role-summary-card"><div><h3>${meta.label}</h3><p>${meta.desc}</p></div><div class="role-summary-columns"><div><h4>التبويبات الظاهرة</h4><div class="permission-chip-list">${meta.tabs.map(x=>`<span class="permission-chip">${x}</span>`).join('')}</div></div><div><h4>الإجراءات المسموح بها</h4><ul class="permission-list">${meta.actions.map(x=>`<li>${x}</li>`).join('')}</ul></div></div></div>`;}
 function roleGuidePanel(){return `<div class="role-guide-grid">${Object.keys(ROLE_PRESETS).map(key=>`<article class="role-guide-item"><strong>${ROLE_PRESETS[key].label}</strong><p>${ROLE_PRESETS[key].desc}</p><div class="permission-chip-list">${ROLE_PRESETS[key].tabs.slice(0,6).map(x=>`<span class="permission-chip">${x}</span>`).join('')}${ROLE_PRESETS[key].tabs.length>6?'<span class="permission-chip muted">...</span>':''}</div><ul class="permission-list">${ROLE_PRESETS[key].actions.map(x=>`<li>${x}</li>`).join('')}</ul></article>`).join('')}</div>`;}
 let tourStepIndex=-1,tourSteps=[];
-function buildTourSteps(){const steps=[{view:'overview',selector:'[data-view="overview"]',title:'نظرة عامة سريعة',text:'ابدأ من هنا لمراجعة ملخص المخزون والحركات والتنبيهات.'},{view:'inventory',selector:'[data-view="inventory"]',title:'مخزون الأصناف',text:'هنا تبحث عن الأصناف وتراجع الوجبات والرصيد والصلاحية.'},{view:'receiving',selector:'[data-view="receiving"]',title:'سندات الوارد',text:'استخدم هذا القسم لتسجيل المواد الداخلة إلى المذخر.'},{view:'distribution',selector:'[data-view="distribution"]',title:'سندات الصادر',text:'استخدمه لتجهيز الأقسام أو المناقلات الخارجية أو التحويل إلى الصيدلة.'},{view:'reports',selector:'[data-view="reports"]',title:'التقارير',text:'اختر الفترة الزمنية ثم راجع الرسوم والإحصائيات وصدّر النتائج.'},{view:'positions',selector:'[data-view="positions"]',title:'المواقف',text:'هنا تتابع المواد الشحيحة والفائضة والمنتهية والقريبة من الانتهاء.'}];if(can('users'))steps.push({view:'users',selector:'[data-view="users"]',title:'المستخدمون والصلاحيات',text:'من هنا تنشئ الحسابات وتختار نوع كل مستخدم بشكل واضح.'});steps.push({view:'profile',selector:'#accountButton',title:'حسابك والجولة',text:'يمكنك العودة إلى هذه الجولة لاحقاً من قائمة الحساب أعلى الصفحة.'});return steps;}
+function buildTourSteps(){const steps=[{view:'overview',selector:'[data-view="overview"]',title:'نظرة عامة سريعة',text:'ابدأ من هنا لمراجعة ملخص المخزون والحركات والتنبيهات.'},{view:'inventory',selector:'[data-view="inventory"]',title:'مخزون الأصناف',text:'هنا تبحث عن الأصناف وتراجع الوجبات والرصيد والصلاحية.'},{view:'receiving',selector:'[data-view="receiving"]',title:'سندات الوارد',text:'استخدم هذا القسم لتسجيل المواد الداخلة إلى المذخر.'},{view:'distribution',selector:'[data-view="distribution"]',title:'سندات الصادر',text:'استخدمه لتجهيز الأقسام أو المناقلات الخارجية أو التحويل إلى الصيدلة.'},{view:'reports',selector:'[data-view="reports"]',title:'التقارير',text:'اختر الفترة الزمنية ثم راجع الرسوم والإحصائيات وصدّر النتائج.'},{view:'positions',selector:'[data-view="positions"]',title:'المواقف',text:'هنا تتابع المواد الشحيحة والفائضة والمنتهية والقريبة من الانتهاء.'}];steps.push({view:'profile',selector:'#accountButton',title:'حسابك والجولة',text:'يمكنك العودة إلى هذه الجولة لاحقاً من قائمة الحساب أعلى الصفحة.'});return steps.filter(x=>allowedTab(x.view));}
 function clearTourHighlight(){$$('.tour-highlight').forEach(el=>el.classList.remove('tour-highlight'));}
-function closeTour(save=true){const root=$('#tourOverlay');if(!root)return;root.classList.remove('open');root.setAttribute('aria-hidden','true');root.innerHTML='';document.body.classList.remove('tour-open');clearTourHighlight();tourStepIndex=-1;if(save){try{localStorage.setItem('ims_tour_seen_v429','1')}catch(_e){}}}
-function renderTourStep(){const root=$('#tourOverlay');if(!root)return;const step=tourSteps[tourStepIndex];if(!step)return closeTour(false);clearTourHighlight();const target=step.selector?document.querySelector(step.selector):null;target?.classList.add('tour-highlight');target?.scrollIntoView?.({block:'center',behavior:'smooth'});root.innerHTML=`<div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tourTitle"><div class="tour-card-top"><span class="tour-step-count">الخطوة ${tourStepIndex+1} من ${tourSteps.length}</span><button type="button" class="db-btn secondary small" data-tour-close>إغلاق</button></div><h2 id="tourTitle">${step.title}</h2><p>${step.text}</p><div class="tour-actions"><button type="button" class="db-btn secondary" data-tour-skip>إنهاء الجولة</button>${tourStepIndex>0?'<button type="button" class="db-btn secondary" data-tour-prev>السابق</button>':''}<button type="button" class="db-btn" data-tour-next>${tourStepIndex===tourSteps.length-1?'إنهاء':'التالي'}</button></div></div>`;root.classList.add('open');root.setAttribute('aria-hidden','false');document.body.classList.add('tour-open');}
+function closeTour(save=true){const root=$('#tourOverlay');if(!root)return;root.classList.remove('open');root.setAttribute('aria-hidden','true');root.innerHTML='';document.body.classList.remove('tour-open');clearTourHighlight();tourStepIndex=-1;if(save){try{localStorage.setItem('ims_tour_seen_v430_'+user.id,'1')}catch(_e){}}}
+function renderTourStep(){const root=$('#tourOverlay');if(!root)return;const step=tourSteps[tourStepIndex];if(!step)return closeTour(false);clearTourHighlight();const target=step.selector?document.querySelector(step.selector):null;target?.classList.add('tour-highlight');$('#dashboardView .db-head')?.classList.add('tour-highlight');$('#topTitle')?.classList.add('tour-highlight');root.innerHTML=`<div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tourTitle"><div class="tour-card-top"><span class="tour-step-count">الخطوة ${tourStepIndex+1} من ${tourSteps.length}</span><button type="button" class="db-btn secondary small" data-tour-close>إغلاق</button></div><h2 id="tourTitle">${step.title}</h2><p>${step.text}</p><div class="tour-actions"><button type="button" class="db-btn secondary" data-tour-skip>إنهاء الجولة</button>${tourStepIndex>0?'<button type="button" class="db-btn secondary" data-tour-prev>السابق</button>':''}<button type="button" class="db-btn" data-tour-next>${tourStepIndex===tourSteps.length-1?'إنهاء':'التالي'}</button></div></div>`;root.classList.add('open');root.setAttribute('aria-hidden','false');document.body.classList.add('tour-open');}
 function openTourStep(index){tourSteps=buildTourSteps();tourStepIndex=Math.max(0,Math.min(index,tourSteps.length-1));const step=tourSteps[tourStepIndex];if(step?.view&&view!==step.view)showPage(step.view);setTimeout(renderTourStep,80);}
-function startTour(force=false){tourSteps=buildTourSteps();if(!tourSteps.length)return;if(!force){try{if(localStorage.getItem('ims_tour_seen_v429'))return;}catch(_e){}}openTourStep(0);}
+function startTour(force=false){tourSteps=buildTourSteps();if(!tourSteps.length)return;if(!force){try{if(localStorage.getItem('ims_tour_seen_v430_'+user.id))return;}catch(_e){}}openTourStep(0);}
 function nextTourStep(delta){if(tourStepIndex<0)return;const next=tourStepIndex+delta;if(next<0)return;if(next>=tourSteps.length){closeTour(true);return;}openTourStep(next);}
 const panel=(title,content,icon='package')=>`<section class="db-panel"><h2>${I(icon)} ${E(title)}</h2>${content}</section>`;
 const table=(cols,rows)=>rows.length?`<div class="db-table-wrap"><table class="db-table"><thead><tr>${cols.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`:msg('No records yet','Add your first record using the action button above.');
@@ -403,7 +404,7 @@ function departmentRows(depts){return depts.map(it=>`<tr><td><strong>${E(it.name
 const routeNames={recovery_undo:'Controlled Undo',recovery_redo:'Controlled Redo',opening_balance:'Opening balance',department_issue:'Hospital departments',external_transfer_out:'External transfer',pharmacy_transfer_out:'Transfer to Pharmacy Department',pharmacy_receipt:'Pharmacy Department',purchase_receipt:'Purchases',external_transfer_in:'External transfer received',internal_return:'Internal department return'};
 function movementRows(movements){return movements.map(m=>{
  const pending=m.paperwork_pending===1;
- const action=pending&&can('movement_write')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
+ const action=pending&&can('paperwork')?`<div class="db-small-actions" style="margin-top:8px"><button type="button" data-complete-paperwork="${m.id}">Complete missing papers</button></div>`:'';
  const docs=`<strong>${E(m.paper_ref||'—')}</strong>${m.dispatch_ref?`<div class="tiny">Dispatch/receipt: ${E(m.dispatch_ref)}</div>`:''}${pending?`<div>${badge('Emergency · papers pending','warning')}</div>`:''}${m.paperwork_completed_at?`<div class="tiny">Papers completed: ${D(m.paperwork_completed_at)}</div>`:''}${action}`;
  const recipient=m.department_name||m.external_destination||m.source||'—';
  const lines=Array.isArray(m.lines)?m.lines:[],first=lines[0];
@@ -442,7 +443,7 @@ function overview(){
  const kpis=`<div class="db-kpis">${metrics.map(([label,num,desc,icon])=>`<div class="db-kpi"><span class="name">${I(icon)} ${E(label)}</span><span class="num">${N(num)}</span><span class="desc">${E(desc)}</span></div>`).join('')}</div>`;
  const exp=cache.batches.filter(b=>b.on_hand>0&&b.expiry_date&&b.expiry_date>=todayBaghdad()&&b.expiry_date<=new Date(Date.now()+60*864e5).toISOString().slice(0,10));
  return `<div class="db-decor">${head('Welcome back, '+user.full_name,'Your central warehouse is connected to the local database. Inventory and movements below update after every saved transaction.')}
- <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${can('department_write')?`<button class="db-btn secondary" data-new="dept">${I('building')} Add department</button>`:''}${can('movement_write')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button><button class="db-btn secondary" data-go="distribution">${I('outgoing')} Distribute stock</button>`:''}</div></div>
+ <div class="db-actions">${can('item_write')&&(user.role==='admin'||user.branch)?`<button class="db-btn" data-new="item">${I('package')} Add item</button>`:''}${can('department_write')?`<button class="db-btn secondary" data-new="dept">${I('building')} Add department</button>`:''}${allowedTab('receiving')?`<button class="db-btn secondary" data-go="receiving">${I('incoming')} Receive shipment</button>`:''}${allowedTab('distribution')?`<button class="db-btn secondary" data-go="distribution">${I('outgoing')} Distribute stock</button>`:''}</div></div>
  ${user.role!=='admin'&&!user.branch?'<div class="db-alert"><strong>Warehouse branch not assigned.</strong> Ask your administrator to assign your account to one branch before managing stock.</div>':''}
  ${user.must_change_password?`<div class="db-alert"><strong>Change your temporary password.</strong> Open My account → Change password to secure your login.</div>`:''}
  ${kpis}<div class="db-layout"><div>${panel('Recent warehouse movements',table(['Movement','Type','Paper reference','From / To','Lines','By'],movementRows(cache.movements.slice(0,6))),'history')}</div><div>${panel('Attention needed',`<div class="db-help">${I('warning')} ${exp.length} <span>Expiring batches (next 60 days)</span></div>`,'warning')}
@@ -705,10 +706,10 @@ const routeField=(selector,content)=>`<div class="dest-fields" data-${selector}>
 function receiving(){return `${head('Stock receipt voucher','Choose one of four documented routes into the central warehouse. Returning department stock is recorded as an actual RETURN movement.')}
 ${panel('Stock receipt voucher',`<form id="receiveForm" class="db-form">
 <div class="dest-choice four-routes" role="group" aria-label="Incoming route">
-${shipmentChoice('route','pharmacy_receipt','Pharmacy Department','Received from Pharmacy Department',true)}
-${shipmentChoice('route','purchase_receipt','Purchases','Drugstore and distributor receipts')}
-${shipmentChoice('route','external_transfer_in','External transfer','Received from another hospital or sector')}
-${shipmentChoice('route','internal_return','Internal department return','Materials returned by a hospital department')}
+${can('receive')?shipmentChoice('route','pharmacy_receipt','Pharmacy Department','Received from Pharmacy Department',true):''}
+${can('receive')?shipmentChoice('route','purchase_receipt','Purchases','Drugstore and distributor receipts'):''}
+${can('receive')?shipmentChoice('route','external_transfer_in','External transfer','Received from another hospital or sector'):''}
+${can('return_stock')?shipmentChoice('route','internal_return','Internal department return','Materials returned by a hospital department',!can('receive')):''}
 </div><div class="db-grid">
 ${routeField('in-pharmacy',field('Received from',`<input class="db-input" value="Pharmacy Department" data-localized-value="Pharmacy Department" readonly>`))}
 ${routeField('in-purchase',field('Drugstore / distributor name',inp('source','Supplier or distributor','text','maxlength="180"')))}
@@ -794,7 +795,7 @@ function returns(){return `${head('Stock adjustments','Department returns are re
 ${can('adjust')?panel('Manager-only stock correction',`<form id="adjustForm" class="db-form"><div class="db-grid">${field('Correction type',`<select class="db-select" name="kind"><option value="ADJUST_PLUS">Increase available stock</option><option value="ADJUST_MINUS">Decrease available stock</option></select>`)}${field('Reference / reason code',inp('paper_ref','e.g. COUNT-2026-003','text','required'))}${field('Detailed reason',`<textarea class="db-textarea" name="notes" required placeholder="Why was this correction needed?"></textarea>`)}</div><div id="adjustLines">${issueLine(true)}</div><div class="db-actions"><button class="db-btn" type="submit">Record correction with audit trail</button></div></form>`,'warning'):msg('Read-only','Only managers and administrators with branch permissions can adjust stock.')}`}
 function users(){
  if(!can('users'))return msg('Access denied','Only administrators manage staff accounts.');
- const rows=users=>users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.is_ultra_admin?'Ultra administrator':x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">Details</button></td><td>${x.id!==user.id&&!x.is_ultra_admin?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:x.is_ultra_admin?'Protected owner account':'Current account'}</td></tr>`);
+ const rows=users=>users.map(x=>`<tr><td><strong>${E(x.username)}</strong><div class="tiny">${E(x.full_name)}</div></td><td>${badge(x.is_ultra_admin?'Ultra administrator':x.custom_access?'Custom / '+x.role:x.role,x.role==='admin'?'blue':'neutral')}</td><td>${E(x.role==='admin'?'All branches':branchName(x.branch))}</td><td>${badge(x.is_active?'Active':'Disabled',x.is_active?'':'danger')}</td><td><button type="button" class="db-btn secondary small" data-user-details="${x.id}">Details</button></td><td>${x.id!==user.id&&!x.is_ultra_admin?`<div class="db-small-actions"><button data-edit-user="${x.id}">Role / status</button><button data-reset-user="${x.id}">Reset password</button></div>`:x.is_ultra_admin?'Protected owner account':'Current account'}</td></tr>`);
  return `${head('Users and permissions','Only administrators can create staff accounts. Rights are checked by the backend on every action.',`<button class="db-btn" data-new="user">${I('users')} Create account</button>`)}<div class="db-note">Administrators manage all branches. Managers can edit items and correct stock only in their assigned branch. Operators can receive and distribute stock only in their branch. Viewers are read-only. Each non-admin account must have one assigned branch.</div>${panel('Role guide',roleGuidePanel(),'users')}${panel('Warehouse accounts',pagedTable('users',cache.users,['Username / name','Role','Assigned branch','Status','Profile details','Actions'],rows),'users')}`;
 }
 function backup(){return `${head('Database backup and restore','Administrators can export and restore authorized backups. Google Drive is restricted to the ultra administrator.')}
@@ -867,9 +868,9 @@ ${panel('Operations audit trail',`<div id="auditLog">Loading events...</div>`,'h
 const pages={overview,inventory,item_movement:itemMovements,profile:profilePage,warehouseStatements:warehouseStatements,positions:warehouseStatements,departments,batches,movements,receiving,distribution,returns,users,backup,reports,settings};
 function showPage(next){
  if(next==='batches')next='inventory';
- if(!pages[next])next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup'))||(next==='settings'&&user.role!=='admin'))next='overview';
+ if(!pages[next]||!allowedTab(next))next='overview';if((next==='users'&&!can('users'))||(next==='backup'&&!can('backup'))||(next==='settings'&&user.role!=='admin'))next='overview';
  closeColumnManager();view=next;$$('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===next);b.setAttribute('aria-current',b.dataset.view===next?'page':'false')});
- $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='reports')IMSReports.load();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='item_movement')filterItemMovements();if(next==='movements')loadMovementPage();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}window.HWLang?.apply();closeMenu();
+ $('#topTitle').textContent=headers[next];$('#dashboardView').innerHTML=pages[next]();if(next==='reports')IMSReports.load();if(next==='positions')filterStatement();if(next==='inventory')filterInventory();if(next==='item_movement')filterItemMovements();if(next==='movements')loadMovementPage();if(next==='distribution'){syncOutgoingDestination($('#issueForm'));updateFefoNotices();}if(next==='receiving'){const f=$('#receiveForm');const lines=f?.querySelector('#receiptLines');if(lines)lines.dataset.returnMode='0';syncIncomingRoute(f)}$$('[data-go]').forEach(b=>{if(!allowedTab(b.dataset.go))b.hidden=true});window.HWLang?.apply();closeMenu();
  if(next==='settings'&&user?.role==='admin')loadAudit();if(next==='profile')loadProfile();if(next==='backup'&&user?.is_ultra_admin)loadGoogleDriveStatus();
  window.scrollTo({top:0,behavior:'instant'});
 }
@@ -918,7 +919,7 @@ function editItem(it=null){
   f.push(field('Reference price — IQD',`<input name="price_dinars" class="db-input" type="number" min="0" max="999999999" step="1" value="${it.price_fils==null?'':Math.floor(it.price_fils/1000)}">`));
   f.push(field('Reference price — fils',`<input name="price_fils_component" class="db-input" type="number" min="0" max="999" step="1" value="${it.price_fils==null?'':it.price_fils%1000}">`));
   f.push(wide(field('Active status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`)));
- }else{
+ }else if(can('opening_stock')){
   f.push(`<div class="db-field wide opening-balance-choice"><label class="opening-balance-label"><input type="checkbox" name="opening_balance" value="1" data-opening-balance><span>Opening balance</span></label><small>Tick only for stock already physically in the warehouse. The opening quantity will be recorded once in movement history.</small></div>`);
   f.push(`<div class="opening-balance-fields wide" data-opening-fields hidden>
     <div class="opening-balance-heading">Opening stock — multiple batches</div>
@@ -993,17 +994,22 @@ function quickReceiptForNewItem(itemId, ctx){
 function editDept(it=null){modalOpen(it?'Edit department':'Add department','Departments are distribution destinations, not separate inventory locations.',
  field('Department name',`<input name="name" class="db-input" required value="${E(it?.name||'')}" placeholder="Emergency Department">`)+(it?field('Status',`<select class="db-select" name="active"><option value="1" ${it.active?'selected':''}>Active</option><option value="0" ${!it.active?'selected':''}>Inactive</option></select>`):''),
  `department:${it?.id||'new'}`)}
+const accessActions={item_write:['إضافة وتعديل الأصناف','Add and edit items'],department_write:['إدارة الأقسام','Manage departments'],receive:['تسجيل الوارد','Record receipts'],issue:['تسجيل الصادر والمناقلات','Record issues and transfers'],return_stock:['تسجيل المرتجعات','Record returns'],paperwork:['إكمال المستندات الطارئة','Complete emergency paperwork'],adjust:['تسويات المخزون','Stock adjustments'],opening_stock:['تسجيل الرصيد الافتتاحي','Record opening stock']};
+const accessTabs={inventory:['مخزون الأصناف','Inventory'],movements:['حركة المخزن','Movement history'],item_movement:['حركة الأصناف','Item movements'],departments:['الأقسام','Departments'],positions:['المواقف','Statements'],reports:['التقارير','Reports']};
+const accessText=(ar,en)=>window.HWLang?.get()==='en'?en:ar;
+function presetAccess(role){return {tabs:Object.keys(accessTabs),actions:role==='viewer'?[]:role==='operator'?['receive','issue','return_stock','paperwork']:Object.keys(accessActions)};}
+function accessEditor(role,raw){let v=typeof raw==='string'?JSON.parse(raw):raw;let opts=v||presetAccess(role);return `<div class="wide custom-access" data-access-editor ${role==='admin'?'hidden':''}><label class="access-toggle"><input type="checkbox" data-custom-toggle ${v?'checked':''}> ${accessText('تخصيص صلاحيات هذا الحساب','Customize this account')}</label><div data-custom-options ${v?'':'hidden'}><p>${accessText('اختر الإجراءات المسموحة والتبويبات الظاهرة. إخفاء التبويب ينظم الواجهة فقط ولا يمنع قراءة البيانات المشتركة.','Choose allowed actions and visible tabs. Hiding a tab changes navigation only, not shared data access.')}</p>${[['tabs',accessTabs,accessText('التبويبات الظاهرة','Visible tabs')],['actions',accessActions,accessText('الإجراءات المسموحة','Allowed actions')]].map(([k,values,title])=>`<h3>${title}</h3><div class="access-grid">${Object.entries(values).map(([id,n])=>`<label><input type="checkbox" data-access-kind="${k}" value="${id}" ${opts[k].includes(id)?'checked':''}> ${accessText(...n)}</label>`).join('')}</div>`).join('')}</div></div>`;}
 function createUser(){modalOpen('Create staff account','Choose exactly one warehouse branch per employee. Administrators are the exception and can access all branches.',
  field('Username',inp('username','e.g. warehouse01','text','required minlength="3" pattern="[a-zA-Z0-9_.-]+"'))+
  field('Full name',inp('full_name','Employee full name','text','required'))+
  field('Temporary password (8+ characters)',inp('password','At least 8 characters','password','required minlength="8"'))+
  `<div class="db-field wide"><span>نوع الحساب</span>${rolePresetCards('viewer')}<small>اختر نوع الحساب، وستظهر لك التبويبات والإجراءات المتاحة لهذا المستخدم.</small></div>`+
- `<div class="wide" data-user-role-summary>${rolePresetSummary('viewer')}</div>`+
+ `<div class="wide" data-user-role-summary>${rolePresetSummary('viewer')}</div>`+accessEditor('viewer',null)+
  field('Assigned branch',`<select class="db-select" name="branch" data-user-branch required>${branchList('')}</select>`, 'Required for staff accounts. Administrators automatically have access to all branches.'),
  'user:new','Create user')}
 function editUser(it){modalOpen('Edit account: '+it.username,'Change the role, branch or status. Changing a branch signs the employee out immediately.',
  `<div class="db-field wide"><span>نوع الحساب</span>${rolePresetCards(it.role||'viewer')}<small>اختر نوع الحساب، وستظهر لك التبويبات والإجراءات المتاحة لهذا المستخدم.</small></div>`+
- `<div class="wide" data-user-role-summary>${rolePresetSummary(it.role||'viewer')}</div>`+
+ `<div class="wide" data-user-role-summary>${rolePresetSummary(it.role||'viewer')}</div>`+accessEditor(it.role,it.custom_access)+
  field('Assigned branch',`<select name="branch" class="db-select" data-user-branch>${branchList(it.branch||'')}</select>`, 'One branch per staff account. Administrators have access to all branches.')+
  field('Account status',`<select name="is_active" class="db-select"><option value="1" ${it.is_active?'selected':''}>Active</option><option value="0" ${!it.is_active?'selected':''}>Disabled</option></select>`),`user:${it.id}`,'Update account')}
 function resetUser(it){modalOpen('Reset password: '+it.username,'This resets the password and signs out the employee from any active session.',
@@ -1037,7 +1043,7 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
  }
  if(entity==='item'){if(id!=='new')d.active=d.active==='1';createdItem=await api(id==='new'?'/api/items':'/api/items/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='department'){if(id!=='new')d.active=d.active==='1';await api(id==='new'?'/api/departments':'/api/departments/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
- else if(entity==='user'){if(id!=='new')d.is_active=d.is_active==='1';await api(id==='new'?'/api/users':'/api/users/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
+ else if(entity==='user'){d.custom_access=d.role!=='admin'&&form.querySelector('[data-custom-toggle]')?.checked?Object.fromEntries(['tabs','actions'].map(k=>[k,$$(`[data-access-kind="${k}"]:checked`,form).map(x=>x.value)])):null;if(id!=='new')d.is_active=d.is_active==='1';await api(id==='new'?'/api/users':'/api/users/'+id,{method:id==='new'?'POST':'PATCH',data:d})}
  else if(entity==='reset'){await api('/api/users/'+id+'/reset-password',{method:'POST',data:d})}
  const ctx=entity==='item'&&id==='new'?inlineNewItem:null;
  modalClose();await refreshData();
@@ -1053,7 +1059,7 @@ async function submitEntity(form){const type=form.dataset.entity, [entity,id]=ty
    const product=ctx.line.querySelector('[data-issue-product]');
    if(product){product.value=String(createdItem.id);syncIssueProduct(ctx.line,createdItem.opening_batch_id||undefined);}
    if(createdItem.opening_batch_id){inlineNewItem=null;toast('Opening balance recorded. The new batch is available for shipment.');}
-   else{quickReceiptForNewItem(createdItem.id,ctx);toast('Item registered with zero stock. Record an incoming receipt to issue it.');}
+   else if(can('receive')){quickReceiptForNewItem(createdItem.id,ctx);toast('Item registered with zero stock. Record an incoming receipt to issue it.');}else{inlineNewItem=null;toast('Item registered with zero stock. Ask an authorized employee to record the receipt.');}
   }
  }else{inlineNewItem=null;showPage(view);toast('Saved successfully in the database')}
 }
@@ -1391,7 +1397,7 @@ document.addEventListener('change',async e=>{
  if(e.target.matches('[data-receive-line] select[data-key="item_id"]'))prefillReceiptPrice(e.target.closest('[data-receive-line]'));
  if(e.target.matches('#entityForm select[name="branch"]'))syncItemBranchFields(e.target.closest('#entityForm'));
  if(e.target.matches('#entityForm [data-opening-balance]'))syncOpeningBalanceFields(e.target.closest('#entityForm'));
- if(e.target.matches('[data-user-role]'))syncUserBranchField(e.target.closest('#entityForm'));
+ if(e.target.matches('[data-user-role]')){const f=e.target.closest('#entityForm');const ed=f.querySelector('[data-access-editor]');if(ed)ed.outerHTML=accessEditor(userRoleValue(f),null);syncUserBranchField(f);}if(e.target.matches('[data-custom-toggle]')){const ed=e.target.closest('[data-access-editor]');ed.querySelector('[data-custom-options]').hidden=!e.target.checked;const summary=ed.closest('form').querySelector('[data-user-role-summary]');if(summary)summary.hidden=e.target.checked;}
 });
 function syncUserBranchField(form){
  const role=userRoleValue(form);
@@ -1400,7 +1406,7 @@ function syncUserBranchField(form){
  if(admin)branch.value='';
  form?.querySelectorAll('[data-role-card]').forEach(card=>card.classList.toggle('active',card.dataset.roleCard===role));
  const summary=form?.querySelector('[data-user-role-summary]');
- if(summary)summary.innerHTML=rolePresetSummary(role);
+ if(summary){summary.innerHTML=rolePresetSummary(role);summary.hidden=!!form.querySelector('[data-custom-toggle]')?.checked;}
 }
 
 function filterMovements(){resetPage('movements');loadMovementPage();}
@@ -1450,7 +1456,7 @@ document.addEventListener('keydown',e=>{
  $('#userName').textContent=user.full_name;$('#userRole').textContent=user.is_ultra_admin?'Ultra administrator':user.role[0].toUpperCase()+user.role.slice(1);
  if(!can('users'))$$('[data-view="users"]').forEach(x=>x.style.display='none');
  if(!can('backup'))$$('[data-view="backup"]').forEach(x=>x.style.display='none');
- if(user.role!=='admin')$$('[data-view="settings"]').forEach(x=>x.style.display='');
+ $$('[data-view]').forEach(x=>{x.style.display=allowedTab(x.dataset.view)?'':'none'});
  await refreshData();showPage(location.hash.slice(1)||'overview');setTimeout(()=>startTour(false),450);
  const gd=new URLSearchParams(location.search).get('gdrive');if(gd){toast(gd==='connected'?'Google Drive connected successfully':'Google authorization failed. Please try again.',gd==='connected'?'ok':'error');history.replaceState(null,'',location.pathname+location.hash);}
 }catch(e){$('#dashboardView').innerHTML=msg('Database unavailable',e.message);toast(e.message,'error')}})();

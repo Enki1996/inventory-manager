@@ -1,0 +1,5 @@
+# V4.30
+- Tutorial: clear background, light dim, page heading and navigation highlighting, no user-management step, per-account local browser completion.
+- Staff account editor: choose preset or customize action grants and visible navigation tabs. The eight action grants are enforced on the backend. Navigation visibility is a presentation setting, not a data confidentiality boundary; shared read APIs retain existing access rules. Administrator privileges and owner-only recovery/cloud actions remain protected. Non-administrators retain one assigned branch. Changes invalidate sessions.
+- SQLite schema 11 adds nullable users.custom_access. Existing users keep presets. Migration runs automatically on startup and restore, preserving records. Back up before deployment. Older app versions do not understand custom permissions; do not downgrade while custom accounts are active.
+- Tested custom grant/denial, session revocation, administrator escalation rejection, and prior audit recovery. Browser visual inspection not performed.
