@@ -382,3 +382,42 @@ body.column-dialog-open{overflow:hidden}
 .statement-print-button{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;box-shadow:0 6px 16px rgba(5,137,144,.13)}
 .statement-print-button .i{width:17px;height:17px}
 @media(max-width:750px){.statement-print-button{flex:1;justify-content:center;min-width:165px}}
+
+
+/* V4.29 finishing touches */
+.include-inactive{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-size:12px;color:#486d7d;padding:10px 12px;border:1px solid #d4e5ea;border-radius:10px;background:rgba(255,255,255,.92);flex:0 0 auto;min-height:42px}
+[dir=rtl] .include-inactive{flex-direction:row-reverse}
+.include-inactive input{accent-color:#079f9c;margin:0;flex:0 0 auto}
+.include-inactive span{display:inline-flex;align-items:center}
+.role-picker{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.role-card{position:relative;display:flex;flex-direction:column;gap:6px;padding:13px 14px;border:1px solid #d6e7ec;border-radius:14px;background:#fbfeff;cursor:pointer;transition:border-color .2s,box-shadow .2s,background .2s}
+.role-card input{position:absolute;opacity:0;pointer-events:none}
+.role-card strong{font-size:12px;color:#194458}
+.role-card small{font-size:11px;color:#6f8896;line-height:1.7}
+.role-card.active{border-color:#20aaa7;background:#eefbfa;box-shadow:0 0 0 3px rgba(34,170,167,.11)}
+.role-summary-card,.role-guide-item{border:1px solid #dbe9ee;border-radius:16px;background:linear-gradient(180deg,#ffffff,#fbfdff);padding:16px}
+.role-summary-card h3,.role-guide-item strong{display:block;font-size:14px;color:#173e54;margin-bottom:6px}
+.role-summary-card p,.role-guide-item p{font-size:12px;color:#6b8695;line-height:1.8;margin-bottom:13px}
+.role-summary-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.role-summary-columns h4{font-size:12px;color:#36596b;margin-bottom:8px}
+.permission-chip-list{display:flex;flex-wrap:wrap;gap:8px}
+.permission-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#f0f8fb;border:1px solid #d8eaf0;font-size:11px;color:#355c6f}
+.permission-chip.muted{opacity:.75}
+.permission-list{margin:0;padding-inline-start:18px;color:#44697c;font-size:12px;line-height:1.8}
+.role-guide-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.tour-overlay{display:none;position:fixed;inset:0;z-index:1400;background:rgba(16,45,64,.42);backdrop-filter:blur(4px);padding:20px}
+.tour-overlay.open{display:flex;align-items:flex-end;justify-content:flex-start}
+.tour-card{width:min(520px,100%);background:#fff;border:1px solid #eef5f7;border-radius:22px;box-shadow:0 30px 90px rgba(7,52,72,.22);padding:22px}
+.tour-card-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.tour-step-count{font-size:11px;font-weight:800;color:#0e8e93}
+.tour-card h2{font-size:21px;color:#17394b;margin:0 0 9px}
+.tour-card p{font-size:13px;color:#688392;line-height:1.9;margin:0 0 16px}
+.tour-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px}
+.tour-highlight{position:relative;z-index:1410;box-shadow:0 0 0 4px rgba(23,192,179,.28),0 0 0 10px rgba(255,255,255,.75);border-radius:14px}
+body.tour-open{overflow:hidden}
+#startTourButton{display:flex;align-items:center;gap:9px;width:100%;padding:11px;border-radius:8px;font-size:12px;font-weight:800;background:transparent;border:0;color:#35586b}
+#startTourButton:hover{background:#f1fafb}
+#startTourButton svg{height:16px;width:16px}
+@media(max-width:760px){.role-picker,.role-guide-grid,.role-summary-columns{grid-template-columns:1fr}.tour-overlay{padding:14px}.tour-card{padding:18px}}
+
+.db-grid>.wide{grid-column:1/-1}

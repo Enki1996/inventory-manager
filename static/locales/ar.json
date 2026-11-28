@@ -30,7 +30,7 @@
   "Movements": "الحركات",
   "Expiry": "الصلاحية",
   "Warehouse overview": "نظرة عامة على المخزن",
-  "Central medical warehouse · Overview": "المخزن الطبي المركزي · نظرة عامة",
+  "Central medical warehouse · Overview": "مذخر المستشفى الرئيسي · نظرة عامة",
   "Total items": "إجمالي الأصناف",
   "Registered products": "الأصناف المسجّلة",
   "Received": "ادخال مخزني",
@@ -105,7 +105,7 @@
   "Connected database · Test build": "قاعدة البيانات متصلة · نسخة تجريبية",
   "SQLite database · Admin-managed staff accounts": "قاعدة بيانات SQLite · حسابات يديرها المسؤول",
   "Warehouse Overview": "نظرة عامة على المخزن",
-  "Central medical warehouse": "المخزن الطبي المركزي",
+  "Central medical warehouse": "مذخر المستشفى الرئيسي",
   "Loading account...": "جارٍ تحميل الحساب...",
   "Authenticated staff": "موظف مخوّل",
   "Return home": "العودة إلى الرئيسية",
@@ -1092,5 +1092,9 @@
   "Design & print statement": "تصميم وطباعة الموقف",
   "Print statement": "طباعة الموقف",
   "Expiring batches (next 60 days)": "الوجبات التي تنتهي صلاحيتها خلال 60 يوماً",
-  "Hospital Warehouse IMS · V4.28": "نظام إدارة المذخر · V4.28"
+  "Hospital Warehouse IMS · V4.28": "نظام إدارة المذخر · V4.28",
+  "Main hospital warehouse / Live workspace": "مذخر المستشفى الرئيسي / مساحة العمل",
+  "Main hospital warehouse": "مذخر المستشفى الرئيسي",
+  "Quick tour": "جولة سريعة",
+  "Calculated against the monthly requirement. Scarce: below ${E(statementMode==='scarce'?threshold:DEFAULT_SCARCE_PERCENT)}%. Surplus: above ${E(statementMode==='surplus'?threshold:DEFAULT_SURPLUS_PERCENT)}%.": "يُحسب هذا وفق الاحتياج الشهري. الشحيح: أقل من النسبة المحددة. الفائض: أعلى من النسبة المحددة."
 }
