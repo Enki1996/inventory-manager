@@ -1,0 +1,1 @@
+Typography-only update: Alexandria headings, Readex Pro accents, IBM Plex Sans Arabic body and controls. Font binaries are not bundled: Railway startup downloads them from Google Fonts. Network download and visual rendering were not verified in the preparation environment. Existing database, API and backup code are unchanged.

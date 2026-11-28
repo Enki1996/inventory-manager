@@ -1,11 +1,10 @@
-# IMS V4.27.1 — Home & Login Typography
+# IMS V4.27.1 — Local typography
 
-- `SC_DUBAI.ttf`: headline font used for Arabic Home hero, features, workflow, privacy/terms, login hero and sign-in title; major dashboard and print-designer headings.
-- `VIP Rawy Thin Thin.otf`: lightweight accents on Arabic Home and Login, at sizes large enough to remain legible.
-- `Cairo`: retains body text, controls, tables, reports and numerical data where readability is critical.
-- English styling stays unchanged; the bilingual language switch still works.
-- `Amine_mod` and `banda` styles have been removed from the Home page CSS.
-- No migrations. SQLite schema remains V10. All stock, accounts, backup and restore functionality remains unchanged.
-- This distribution does not contain font files. Use your own uploaded font originals as described in `static/fonts/README.md`.
+All four user-provided fonts are included in static/fonts. No external font downloads or installers are needed.
 
-Deployment: back up first, extract ZIP over your existing private GitHub repository while preserving any font files as appropriate, copy both new fonts into `static/fonts`, push to GitHub, and redeploy the same Railway service with the existing `/data` volume. `/api/health` should report release 4.27.1, schema 10.
+- Alexandria (variable): headings and titles.
+- Readex Pro Regular: body, controls, inventory tables and report text.
+- Cairo Play (variable): Arabic section kickers and decorative accents.
+- IBM Plex Sans Arabic ExtraLight: spacious Arabic homepage introduction only, with dark text.
+
+English uses Readex Pro and Alexandria in place of external fonts. The app release, backend and database schema remain unchanged. Deploy to the same Railway service with its existing data volume.

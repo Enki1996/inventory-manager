@@ -1,11 +1,11 @@
 /* V4 bilingual additions. Always preserve the project's white/icy-blue/teal theme. */
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Tajawal:wght@400;500;600;700;800&display=swap');
+
 html.i18n-pending body{visibility:hidden}
 .language-switch{display:inline-flex;align-items:center;gap:3px;padding:4px;border:1px solid rgba(70,164,182,.23);border-radius:12px;background:rgba(255,255,255,.84);box-shadow:0 4px 20px rgba(33,102,119,.06);direction:ltr;flex-shrink:0}
 .language-switch button{border:0;background:transparent;color:#597a8b;padding:8px 10px;border-radius:8px;font-size:11px;font-weight:800;cursor:pointer;line-height:1.2;white-space:nowrap;transition:background .18s,color .18s}
 .language-switch button.selected{background:linear-gradient(120deg,#17b8b2,#07828a);color:#fff;box-shadow:0 3px 10px rgba(9,156,155,.16)}
 .language-switch button:focus-visible{outline:2px solid #137c85;outline-offset:2px}
-html[lang="ar"] body,html[lang="ar"] button,html[lang="ar"] input,html[lang="ar"] select,html[lang="ar"] textarea,html[lang="ar"] a{font-family:'Cairo','Tajawal',Tahoma,Arial,sans-serif}
+html[lang="ar"] body,html[lang="ar"] button,html[lang="ar"] input,html[lang="ar"] select,html[lang="ar"] textarea,html[lang="ar"] a{font-family:'IMS Readex Pro',Tahoma,Arial,sans-serif}
 html[lang="ar"] body{letter-spacing:0}
 html[lang="ar"] h1,html[lang="ar"] h2,html[lang="ar"] h3,html[lang="ar"] h4,html[lang="ar"] .logo-name,html[lang="ar"] .brand-name{letter-spacing:0 !important;line-height:1.4}
 html[lang="ar"] .brand-sub,html[lang="ar"] .logo-sub{letter-spacing:0 !important;text-transform:none}

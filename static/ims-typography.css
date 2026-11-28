@@ -1,26 +1,38 @@
-/* IMS V4.27.1 — Arabic type system. User-owned font files must be supplied
-   separately in /static/fonts. Deliberately excludes decorative typography
-   from dense forms, quantity fields, stock ledgers and report tables. */
+/* IMS V4.27.1 — locally hosted user-supplied typography. */
 @font-face {
-  font-family: 'IMS SC Dubai';
-  src: url('/static/fonts/SC_DUBAI.ttf?v=4271') format('truetype');
+  font-family: 'IMS Alexandria';
+  src: url('/static/fonts/Alexandria-VariableFont_wght.ttf?v=4271-local') format('truetype');
   font-style: normal;
-  font-weight: 500;
+  font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
-  font-family: 'IMS VIP Rawy Thin';
-  src: url('/static/fonts/VIP%20Rawy%20Thin%20Thin.otf?v=4271') format('opentype');
+  font-family: 'IMS Cairo Play';
+  src: url('/static/fonts/CairoPlay-VariableFont_slntwght.ttf?v=4271-local') format('truetype');
   font-style: normal;
-  font-weight: 100;
+  font-weight: 200 1000;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IMS Readex Pro';
+  src: url('/static/fonts/ReadexPro-Regular.ttf?v=4271-local') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IMS Plex Arabic';
+  src: url('/static/fonts/IBMPlexSansArabic-ExtraLight.ttf?v=4271-local') format('truetype');
+  font-style: normal;
+  font-weight: 200;
   font-display: swap;
 }
 :root {
-  --ims-heading-ar: 'IMS SC Dubai','Cairo','Tajawal',Tahoma,sans-serif;
-  --ims-accent-ar: 'IMS VIP Rawy Thin','Cairo','Tajawal',Tahoma,sans-serif;
-  --ims-text-ar: 'Cairo','Tajawal',Tahoma,sans-serif;
+  --ims-heading-ar: 'IMS Alexandria',Tahoma,sans-serif;
+  --ims-accent-ar: 'IMS Cairo Play',Tahoma,sans-serif;
+  --ims-text-ar: 'IMS Readex Pro',Tahoma,sans-serif;
 }
-/* MAIN SITE — strong Dubai for major text, Rawy for open-space accents. */
+/* MAIN SITE — Alexandria for headings, Cairo Play for accents. */
 html[lang="ar"] .hero h1,
 html[lang="ar"] .section-heading h2,
 html[lang="ar"] .workflow-text h2,
@@ -32,7 +44,7 @@ html[lang="ar"] .protection-card h3,
 html[lang="ar"] .step h3,
 html[lang="ar"] .m-brand-copy strong {
   font-family: var(--ims-heading-ar);
-  font-weight: 500;
+  font-weight: 650;
   letter-spacing: 0 !important;
   line-height: 1.45;
 }
@@ -40,7 +52,7 @@ html[lang="ar"] .hero h1 {line-height:1.47;}
 html[lang="ar"] .hero .eyebrow,
 html[lang="ar"] .section-kicker {
   font-family: var(--ims-accent-ar);
-  font-weight: 100;
+  font-weight: 550;
   font-size: clamp(16px,1.25vw,19px);
   line-height:1.7;
   letter-spacing:0 !important;
@@ -61,7 +73,7 @@ html[lang="ar"] .login-art h1,
 html[lang="ar"] .login-card h2,
 html[lang="ar"] .login-nav .logo-name {
   font-family:var(--ims-heading-ar);
-  font-weight:500;
+  font-weight:650;
   letter-spacing:0 !important;
   line-height:1.48;
 }
@@ -70,7 +82,7 @@ html[lang="ar"] .login-card h2 {font-size:31px;}
 html[lang="ar"] .login-art .eyebrow,
 html[lang="ar"] .login-art .visual-glass {
   font-family:var(--ims-accent-ar);
-  font-weight:100;
+  font-weight:550;
   font-size:18px;
   line-height:1.7;
   letter-spacing:0 !important;
@@ -83,7 +95,7 @@ html[lang="ar"] .login-card button,
 html[lang="ar"] .login-tools {
   font-family:var(--ims-text-ar);
 }
-/* DASHBOARD — just the prominent headings and identity; tables stay Cairo. */
+/* DASHBOARD — just the prominent headings and identity; tables use Readex Pro. */
 html[lang="ar"] .sidebar-head .logo-name,
 html[lang="ar"] .db-page-title,
 html[lang="ar"] .db-head h1,
@@ -91,7 +103,7 @@ html[lang="ar"] .db-head h2,
 html[lang="ar"] .db-panel h2,
 html[lang="ar"] .page-heading h1 {
   font-family:var(--ims-heading-ar);
-  font-weight:500;
+  font-weight:650;
   letter-spacing:0 !important;
 }
 /* PRINT DESIGNER — headings only; preserve measured tabular layout. */
@@ -100,7 +112,7 @@ html[lang="ar"] .settings-intro h1,
 html[lang="ar"] .preview-bar h2,
 html[lang="ar"] .sheet-head-title h3 {
   font-family:var(--ims-heading-ar);
-  font-weight:500;
+  font-weight:650;
 }
 /* The printed item rows, quantities, and prices must remain predictable. */
 html[lang="ar"] .sheet-table,
@@ -121,4 +133,15 @@ html[lang="ar"] textarea {font-family:var(--ims-text-ar);}
   html[lang="ar"] .login-card h2 {font-size:27px;}
   html[lang="ar"] .login-art .eyebrow {font-size:16px;}
   html[lang="ar"] .m-brand-copy strong {font-size:16px;}
+}
+
+/* ExtraLight is reserved for spacious, noncritical display copy. */
+html[lang="ar"] .hero-intro {
+  font-family: 'IMS Plex Arabic', 'IMS Readex Pro', Tahoma, sans-serif;
+  font-weight: 200;
+  font-size: clamp(18px, 1.5vw, 22px);
+  color: #294a5a;
+}
+html[lang="ar"] h1, html[lang="ar"] h2, html[lang="ar"] h3 {
+  font-family: var(--ims-heading-ar);
 }

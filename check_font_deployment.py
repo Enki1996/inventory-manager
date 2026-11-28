@@ -7,8 +7,8 @@ import urllib.request
 if len(sys.argv) != 2 or not sys.argv[1].startswith('https://'):
     sys.exit('Usage: python check_font_deployment.py https://YOUR-RAILWAY-APP-DOMAIN')
 base = sys.argv[1].rstrip('/')
-for name in ('Amine_mod.ttf', 'banda.ttf'):
-    url = f'{base}/static/fonts/{name}?v=4251'
+for name in ('Alexandria-VariableFont_wght.ttf', 'CairoPlay-VariableFont_slntwght.ttf', 'ReadexPro-Regular.ttf', 'IBMPlexSansArabic-ExtraLight.ttf'):
+    url = f'{base}/static/fonts/{name}?v=4271-local'
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={'Range':'bytes=0-64'}),timeout=12) as resp:
             sig = resp.read(4)

@@ -113,3 +113,5 @@ Separate bilingual pages are served at `/privacy.html` and `/terms.html`. The V4
 
 ## V4.24 hero update
 See `V4_24_CHANGES.md`.
+
+Local typography: see V4_27_1_TYPOGRAPHY.md; all four supplied fonts are bundled.
