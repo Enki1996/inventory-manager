@@ -1,6 +1,10 @@
+# Hospital Warehouse IMS V4.28 — Analytics
+
+See `V4_28_ANALYTICS.md`. Existing schema V10 and Railway volume remain unchanged. All four supplied fonts are already bundled.
+
 # Hospital Warehouse IMS V4.27.1 — Typography Refresh
 
-See [`V4_27_1_TYPOGRAPHY.md`](V4_27_1_TYPOGRAPHY.md). The new Arabic font styling applies to Home and Login as well as major headings on related pages. **Copy the two user-provided fonts manually to `static/fonts/` before deployment.** Schema V10 unchanged.
+See [`V4_27_1_TYPOGRAPHY.md`](V4_27_1_TYPOGRAPHY.md). The new Arabic font styling applies to Home and Login as well as major headings on related pages. All four supplied fonts are included in `static/fonts/`. Schema V10 unchanged.
 
 # Hospital Warehouse IMS V4.27 — Print & Report Designer
 

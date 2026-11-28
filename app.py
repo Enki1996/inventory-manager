@@ -52,7 +52,7 @@ BACKUPS.mkdir(exist_ok=True)
 DB_LOCK = threading.RLock()
 SCHEMA_VERSION = 10
 # App release is distinct from the SQLite schema version (no destructive migration).
-APP_RELEASE = '4.27.1'
+APP_RELEASE = '4.28'
 # The installation owner is selected by server configuration, never by staff role editing.
 OWNER_USERNAME = os.getenv('WAREHOUSE_ULTRA_ADMIN_USERNAME', 'enki').strip().lower() or 'enki'
 BRANCHES = ('medication', 'medical_supplies', 'surgical_instruments')
@@ -1503,6 +1503,114 @@ async def complete_emergency_paperwork(movement_id: int, request: Request):
             'movement_id':movement_id,'code':movement['code'],'previous':old,
             'paper_ref':order_ref,'dispatch_ref':dispatch_ref})
     return {'ok':True,'code':movement['code'],'paperwork_pending':False}
+
+
+@app.get('/api/analytics')
+def analytics(request: Request, start: str, end: str, branch: str = '', book: str = '', item: int = 0):
+    u = get_user(request)
+    try:
+        a, b = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+        if a > b or (b-a).days > 3660 or b.year >= 9999: raise ValueError()
+    except ValueError:
+        err(422, 'Choose a valid date range of up to ten years.')
+    if branch and branch not in BRANCHES: err(422, 'Invalid branch')
+    if u['role'] != 'admin':
+        if not u['branch'] or (branch and branch != u['branch']): err(403, 'Branch access denied')
+        branch = u['branch']
+    zone = ZoneInfo('Asia/Baghdad')
+    def utc(day): return dt.datetime.combine(day, dt.time.min, zone).astimezone(dt.timezone.utc).isoformat(timespec='seconds')
+    lo, hi = utc(a), utc(b+dt.timedelta(days=1))
+    conditions, args = [], []
+    for col, val in [('i.branch',branch),('i.category',book),('i.id',item)]:
+        if val: conditions.append(col+'=?'); args.append(val)
+    scope = (' AND '+' AND '.join(conditions)) if conditions else ''
+    joins = ''' FROM movement_lines l JOIN movements m ON m.id=l.movement_id
+      JOIN batches ba ON ba.id=l.batch_id JOIN items i ON i.id=ba.item_id
+      LEFT JOIN departments d ON d.id=m.department_id JOIN users u ON u.id=m.created_by '''
+    with db(readonly=True) as c:
+        c.execute('BEGIN')
+        rows = [dict(r) for r in c.execute('''SELECT m.id movement_id,m.code,m.kind,m.route,m.source,m.external_destination,m.department_id,d.name department,m.created_at,u.username creator,m.paper_ref,l.id line_id,l.qty,l.direction,l.unit_price_fils,i.id item_id,i.name item_name,i.unit,i.branch,i.category book,ba.batch_no,
+        EXISTS(SELECT 1 FROM movement_reversals r WHERE r.original_line_id=l.id AND r.undone_at < ? AND (r.redone_at IS NULL OR r.redone_at >= ?)) reversed '''+joins+' WHERE m.created_at>=? AND m.created_at<?'+scope+' ORDER BY m.created_at,m.id,l.id',[hi,hi,lo,hi]+args)]
+        # Valuation uses the stored lot cost, never an outgoing price override.
+        lot_scope = scope.replace('i.id','i.id')
+        value_now = c.execute('SELECT COALESCE(SUM(ba.on_hand*ba.unit_price_fils),0) FROM batches ba JOIN items i ON i.id=ba.item_id WHERE 1=1'+lot_scope,args).fetchone()[0]
+        value_after = c.execute('SELECT COALESCE(SUM(l.qty*l.direction*ba.unit_price_fils),0)'+joins+' WHERE m.created_at>=?'+scope,[lo]+args).fetchone()[0]
+        value = value_now-value_after
+        historical = {}; expiry = []
+        # Record per-day signed lot-cost changes, including actual corrections.
+        for row in c.execute('SELECT m.created_at,l.qty*l.direction*ba.unit_price_fils delta'+joins+' WHERE m.created_at>=? AND m.created_at<?'+scope,[lo,hi]+args):
+            k=dt.datetime.fromisoformat(row['created_at']).astimezone(zone).date()
+            historical[k]=historical.get(k,0)+(row['delta'] or 0)
+        values=[]; dday=a; step=max(1,((b-a).days+1)//120)
+        while dday<=b:
+            value+=historical.get(dday,0)
+            if (dday-a).days%step==0 or dday==b: values.append({'date':dday.isoformat(),'value':value/1000})
+            dday+=dt.timedelta(days=1)
+        today=dt.datetime.now(zone).date().isoformat()
+        for row in c.execute('SELECT ba.expiry_date,ba.id FROM batches ba JOIN items i ON i.id=ba.item_id WHERE ba.on_hand>0'+scope,args):
+            if not row['expiry_date']: key='unknown'
+            else:
+                days=(dt.date.fromisoformat(row['expiry_date'])-dt.date.fromisoformat(today)).days
+                key='expired' if days<0 else '30' if days<=30 else '60' if days<=60 else '90' if days<=90 else 'later'
+            expiry.append(key)
+        candles=[]; prices=[]; reconciliation=None
+        if item:
+            it=c.execute('SELECT i.id,i.unit,i.name FROM items i WHERE i.id=?'+scope,[item]+args).fetchone()
+            if not it: err(404,'Item not found in selected scope')
+            # Reconstruct actual stock from current balance and the signed ledger, including correction events.
+            stock=c.execute('SELECT COALESCE(SUM(on_hand),0) FROM batches WHERE item_id=?',(item,)).fetchone()[0]
+            after=c.execute('SELECT COALESCE(SUM(l.qty*l.direction),0)'+joins+' WHERE i.id=? AND m.created_at>=?',(item,lo)).fetchone()[0]
+            balance=stock-after
+            baseline=c.execute('SELECT COALESCE(SUM(l.qty*l.direction),0)'+joins+' WHERE i.id=?',(item,)).fetchone()[0]
+            reconciliation=stock-baseline
+            interval='day' if (b-a).days<=62 else 'week' if (b-a).days<=366 else 'month'
+            def bucket(day):
+                if interval=='week': return max(a,day-dt.timedelta(days=day.weekday())).isoformat()
+                if interval=='month': return max(a,day.replace(day=1)).isoformat()
+                return day.isoformat()
+            groups={}; pg={}
+            for r in rows:
+                day=dt.datetime.fromisoformat(r['created_at']).astimezone(zone).date(); k=bucket(day)
+                groups.setdefault(k,[]).append(r)
+                if r['kind']=='IN' and r['route'] not in ('opening_balance','recovery_undo','recovery_redo') and not r['reversed'] and r['unit_price_fils'] is not None:
+                    pg.setdefault(k,[]).append(r['unit_price_fils']/1000)
+            day=a
+            while day<=b:
+                k=bucket(day)
+                if not candles or candles[-1]['date']!=k:
+                    op=balance; high=low=op
+                    # Each shipment is atomic; use balances after whole movements, not intermediate lines.
+                    moves={}
+                    for r in groups.get(k,[]): moves[r['movement_id']]=moves.get(r['movement_id'],0)+r['qty']*r['direction']
+                    for delta in moves.values(): balance+=delta; high=max(high,balance); low=min(low,balance)
+                    candles.append(dict(date=k,open=op,high=high,low=low,close=balance))
+                    if k in pg:
+                        p=pg[k]; prices.append(dict(date=k,open=p[0],high=max(p),low=min(p),close=p[-1]))
+                day+=dt.timedelta(days=1)
+        return {'rows':rows,'candles':candles,'prices':prices,'reconciliation':reconciliation,'values':values,'expiry':expiry}
+
+
+@app.get('/api/analytics/export')
+def analytics_export(request: Request, start: str, end: str, branch: str = '', book: str = '', item: int = 0, kind: str = '', destination: str = ''):
+    from openpyxl import Workbook
+    result=analytics(request,start,end,branch,book,item)
+    def category(r):
+        route=r['route'] or ''
+        return {'recovery_undo':'UNDO','recovery_redo':'REDO','opening_balance':'OPEN'}.get(route) or ('TRANSFER' if 'transfer' in route else 'ADJUST' if r['kind'].startswith('ADJUST') else r['kind'])
+    rows=[r for r in result['rows'] if (not kind or category(r)==kind) and (not destination or any(destination.lower() in str(r.get(k) or '').lower() for k in ('department','external_destination','source')))]
+    wb=Workbook(write_only=True); ws=wb.create_sheet('Transactions')
+    fields=['created_at','code','kind','route','item_name','branch','book','batch_no','qty','unit','direction','unit_price_fils','department','external_destination','source','creator','reversed']
+    ws.append(fields)
+    from openpyxl.cell import WriteOnlyCell
+    for row in rows:
+        cells=[]
+        for key in fields:
+            v=row.get(key); cell=WriteOnlyCell(ws,value=v)
+            if isinstance(v,str): cell.data_type='s'
+            cells.append(cell)
+        ws.append(cells)
+    buf=io.BytesIO(); wb.save(buf); buf.seek(0)
+    return StreamingResponse(buf,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="IMS-report-{start}-{end}.xlsx"'})
 
 
 @app.get('/api/dashboard')
